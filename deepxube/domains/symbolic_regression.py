@@ -1,9 +1,9 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct
+from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, A
 from deepxube.factories.domain_factory import domain_factory
 
-from sympy import *
+from sympy import Expr, simplify, Integer, symbols
 
 
 class SymbolicState(State):
@@ -55,22 +55,10 @@ class SymbolicRegression(
         self.actions_fixed: List[SymbolicAction] = [SymbolicAction(x) for x in [0]]
 
     def sample_start_states(self, num_states: int) -> List[SymbolicState]:
-        """ A method for generating start states. Should try to make this generate states that are as diverse as
-        possible so that the trained heuristic function generalizes well.
-
-        :param num_states: Number of states to get
-        :return: Generated states
-        """
-        return num_states * [0]
+        # only start from empty function (0) for now
+        return num_states * [SymbolicState(Expr(Integer(0)))]
 
     def sample_goal_from_state(self, states_start: Optional[List[SymbolicState]], states_goal: List[SymbolicState]) -> List[SymbolicGoal]:
-        """ Given a state, sample a goal that represents a set of goal states of which the given state is a member.
-
-        :param states_start: Optional list of start states. Can be used to sample goals that are difficult to achieve
-            from the given start state.
-        :param states_goal: List of states from which goals will be sampled.
-        :return: Goals
-        """
         # Implemented like Grid. I'm not sure why this is necessary since it just copies States into Goals?
         return [SymbolicGoal(state_goal.f) for state_goal in states_goal]
 
@@ -78,18 +66,12 @@ class SymbolicRegression(
         return self.actions_fixed.copy()
 
     def next_state(self, states: List[SymbolicState], actions: List[SymbolicAction]) -> Tuple[List[SymbolicState], List[float]]:
-        """ Get the next state and transition cost given the current state and action
-
-        :param states: List of states
-        :param actions: List of actions to take
-        :return: Next states, transition costs
-        """
         states_next: List[SymbolicState] = []
 
         # Should we simplify the expressions every time?
 
         for state, action in zip(states, actions):
-            # temporary just increase exponent
+            # temporary: just increase exponent
             if action.action == 0:
                 if state.f == 0:
                     states_next.append(
@@ -107,6 +89,15 @@ class SymbolicRegression(
         # This assumes we know which function we're trying to get to, but shouldn't this evaluate the function
         # and see if it equals the sample values (i.e. the numbers)
         return [simplify(state.f - goal.f) == 0 for state, goal in zip(states, goals)]
+
+    def string_to_action(self, act_str: str) -> Optional[A]:
+        if act_str in {"0"}:
+            return SymbolicAction(int(act_str))
+        else:
+            return None
+
+    def string_to_action_help(self) -> str:
+        return "0 to increase the exponent"
 
 
 # SymPy Notes
