@@ -1,33 +1,38 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
+import numpy as np
+from matplotlib.figure import Figure
+
+from deepxube.base.factory import Parser
 from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, StateGoalVizable
 from deepxube.factories.domain_factory import domain_factory
 
 from sympy import Expr, simplify, Integer, symbols
 
 
+# pickle file has the start states and goals for examples
+
+
 class SymbolicState(State):
     def __init__(self, expression: Expr):
-        self.f = expression
+        self.expr = expression
 
     def __hash__(self) -> int:
-        return hash(self.f)
+        return hash(self.expr)
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SymbolicState):
             # SymPy tests for equality by subtracting one function from another and testing for 0
             # https://docs.sympy.org/latest/tutorials/intro-tutorial/gotchas.html
-            return simplify(self.f - other.f) == 0
+            return simplify(self.expr - other.expr) == 0
         return NotImplemented
 
 
-# TODO: Question. Why does Goal need to be its own class? Shouldn't it just be a state?
-# represents a set of states
 class SymbolicGoal(Goal):
-    def __init__(self, expression: Expr):
-        self.f = expression
-        # implemented incorrectly
-        # goal here would be defined by the data that I want to do symbolic regression on
+    def __init__(self, points: List[Tuple[float, float]], tolerance: float):
+        """An expression should evaluate to the pairs of values (x, y), eventually implement tolerance."""
+        self.points = points
+        self.tolerance = tolerance
 
 
 class SymbolicAction(Action):
@@ -57,30 +62,32 @@ class SymbolicRegression(
     def __init__(self, num_start_states: int):
         super().__init__()
         self.actions_fixed: List[SymbolicAction] = [SymbolicAction(x) for x in [0]]
-        # random walk from 0 - 10, sampling start states
-        # symbolic_regression.10; need to implement parser class for this see GridParser for example
+        self.num_start_states = num_start_states
+        # TODO: Calling "symbolic_regression.10" should set num_start_states = 10 if Parser is implemented
 
     def sample_start_states(self, num_states: int) -> List[SymbolicState]:
-        # only start from empty function (0) for now
         return num_states * [SymbolicState(Expr(Integer(0)))]
-        # want variety fo start/goal pairs
-        # use all the intermediate states from walk (search)
-    # sample start state, random walk, pick goal state
-    #
+        # TODO: Variety in start/goal pairs.
+        # 1. Sample start state from empty function (generate goal pairs by evaluating the function)
+        # 2. Random walk - pick an action and do it
+        # 3. Sample this next state
+        # 4. Repeat num_states times
 
     def sample_goal_from_state(self, states_start: Optional[List[SymbolicState]], states_goal: List[SymbolicState]) -> List[SymbolicGoal]:
-        # Implemented like Grid. I'm not sure why this is necessary since it just copies States into Goals?
-        return [SymbolicGoal(state_goal.f) for state_goal in states_goal]
-        # one input variable
-        # sample inputs, add noise (assume no noise for now); evaluate the state at some values (assume 0 - 1 for input for now)
-        # fixed number of data points for simplicity
-        # e.g. 20 x's --> 20 y's for set of next data points
+        noise = 0   # TODO: Introduce noise later
+        xs = np.linspace(0, 1, 20)  # TODO: Change these values later, maybe more points
+        xs = [x + noise for x in xs]
 
-        # simpler: assume 20 evenly spaced data points
-        # NN takes in the 20 y points, maybe normalize
-
-
-    # pickle file has the start states and goals for examples
+        goals = []
+        for state in states_goal:
+            points = []
+            for x_value in xs:
+                expr = state.expr.subs(symbols('x'), x_value)
+                points.append(
+                    (x_value, expr.evalf())
+                )
+            goals.append(SymbolicGoal(points=points))
+        return goals
 
     def get_actions_fixed(self) -> List[SymbolicAction]:
         return self.actions_fixed.copy()
@@ -93,23 +100,30 @@ class SymbolicRegression(
         for state, action in zip(states, actions):
             # temporary: just increase exponent
             if action.action == 0:
-                if state.f == 0:
+                if state.expr == 0:
                     states_next.append(
-                        SymbolicState(state.f + symbols('x'))
+                        SymbolicState(state.expr + symbols('x'))
                     )
                 else:
                     states_next.append(
-                        SymbolicState(state.f * symbols('x'))
+                        SymbolicState(state.expr * symbols('x'))
                     )
-        # just using cost of 1 for now; this is fine, shortest path to the good expression should be simplest
         return states_next, [1.0] * len(states_next)
 
     def is_solved(self, states: List[SymbolicState], goals: List[SymbolicGoal]) -> List[bool]:
-        # This assumes we know which function we're trying to get to, but shouldn't this evaluate the function
-        # and see if it equals the sample values (i.e. the numbers)
-        return [simplify(state.f - goal.f) == 0 for state, goal in zip(states, goals)]
-        # this is wrong
-        # should be: our state function evaluates to the data points within some tolerance (Hyperparameter)
+        # Evaluate each state at the x's in goals, and see if the y's match within some tolerance (later).
+        solved = []
+        tolerance = 0
+        for state in states:
+            for x_goal, y_goal in goals.points:
+                expr = state.expr.subs(symbols('x'), x_goal)
+                within_tolerance = np.abs(y_goal - expr.evalf()) <= tolerance
+                if within_tolerance:
+                    solved.append(False)
+                else:
+                    continue
+            solved.append(True)
+        return solved
 
     def string_to_action(self, act_str: str) -> Optional[SymbolicAction]:
         if act_str in {"0"}:
@@ -124,6 +138,14 @@ class SymbolicRegression(
         pass
         # can create a figure with the data points, and the function (state) overlaid
 
+
+@domain_factory.register_parser("symbolic_regression")
+class SymbolicParser(Parser):
+    def parse(self, args_str: str) -> Dict[str, Any]:
+        return {"num_start_states": int(args_str)}
+
+    def help(self) -> str:
+        return "An integer number of start states to generate through a random walk.'"
 
 
 # SymPy Notes
