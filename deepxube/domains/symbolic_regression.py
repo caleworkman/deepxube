@@ -61,14 +61,16 @@ class SymbolicRegression(
     StringToAct[SymbolicState, SymbolicAction, SymbolicGoal]
 ):
 
-    def __init__(self, num_start_states: int):
+    def __init__(self, random_walk_length: int):
         # Test: python -m deepxube viz --domain symbolic_regression.1
+        # use random walk to generate the start statesrandom
         super().__init__()
         self.actions_fixed: List[SymbolicAction] = [SymbolicAction(n) for n in [0]]
-        self.num_start_states = num_start_states
+        self.random_walk_length = random_walk_length
 
     def sample_start_states(self, num_states: int) -> List[SymbolicState]:
         # Start with f(x) = x
+        # Do different random walks
         return num_states * [SymbolicState(x)]
         # TODO: Variety in start/goal pairs.
         # 1. Sample start state from empty function (generate goal pairs by evaluating the function)
@@ -89,12 +91,19 @@ class SymbolicRegression(
         return goals
 
     def get_actions_fixed(self) -> List[SymbolicAction]:
+        # ActsEnum will implement a different function isntead of this one
+        # ActsEnum will depend on the state, so it can look at the expr
         return self.actions_fixed.copy()
 
     def next_state(self, states: list[SymbolicState], actions: list[SymbolicAction]) -> tuple[list[SymbolicState], list[float]]:
         states_next: List[SymbolicState] = []
 
         # Should we simplify the expressions every time? Exploit this later; for now do not simplify
+
+        # work on one "x" at a time; this should let us limit the action space
+        # restricting the action space
+        # i.e. only work on coeff of the most recent term introduced
+        # look into fitting polynomials;
 
         for state, action in zip(states, actions):
 
@@ -111,7 +120,7 @@ class SymbolicRegression(
         return states_next, [1.0] * len(states_next)
 
     def is_solved(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[bool]:
-        # Evaluate each state at the x's in goals, and see if the y's match within some tolerance (later).
+        # Evaluate each state at the x's in goals, and see if the y's match within some tolerance.
         solved = []
         tolerance = 0
 
@@ -123,6 +132,7 @@ class SymbolicRegression(
         return solved
 
     def string_to_action(self, act_str: str) -> Optional[SymbolicAction]:
+        # Just for visualization
         if act_str in {'0', '1', '2', '3'}:
             return SymbolicAction(int(act_str))
         else:
@@ -159,6 +169,11 @@ class SymbolicParser(Parser):
 
     def help(self) -> str:
         return "An integer number of start states to generate through a random walk.'"
+
+
+# For NN, may need to implement a different structure than Grid/Cube
+# For example, our inputs here are flat. Maybe Transformer
+# grid_heur class
 
 # SymPy Notes
 # evaluate expressions at a point by substituting a constant for a variable:
