@@ -68,6 +68,7 @@ class SymbolicRegression(
         self.num_start_states = num_start_states
 
     def sample_start_states(self, num_states: int) -> List[SymbolicState]:
+        # Start with f(x) = x
         return num_states * [SymbolicState(x)]
         # TODO: Variety in start/goal pairs.
         # 1. Sample start state from empty function (generate goal pairs by evaluating the function)
@@ -77,7 +78,7 @@ class SymbolicRegression(
 
     def sample_goal_from_state(self, states_start: Optional[list[SymbolicState]], states_goal: list[SymbolicState]) -> list[SymbolicGoal]:
         noise = 0  # TODO: Introduce noise later
-        xs = np.linspace(0.0001, 1, 20)  # TODO: Change these values later, maybe more points
+        xs = np.linspace(0, 1, 20)  # TODO: Change these values later, maybe more points
         xs = np.add(xs, noise)
 
         goals = []
@@ -96,16 +97,17 @@ class SymbolicRegression(
         # Should we simplify the expressions every time? Exploit this later; for now do not simplify
 
         for state, action in zip(states, actions):
-            # temporary: just increase exponent
+
             if action.action == 0:
-                if state.expr == 0:
-                    states_next.append(
-                        SymbolicState(state.expr + symbols('x', real=True))
-                    )
-                else:
-                    states_next.append(
-                        SymbolicState(state.expr * symbols('x', real=True))
-                    )
+                new_expr = state.expr * x
+            elif action.action == 1:
+                new_expr = state.expr * 2
+            elif action.action == 2:
+                new_expr = state.expr * 1/2
+            elif action.action == 3:
+                new_expr = state.expr + sin(x)
+
+            states_next.append(SymbolicState(new_expr))
         return states_next, [1.0] * len(states_next)
 
     def is_solved(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[bool]:
@@ -121,13 +123,16 @@ class SymbolicRegression(
         return solved
 
     def string_to_action(self, act_str: str) -> Optional[SymbolicAction]:
-        if act_str in {"0"}:
+        if act_str in {'0', '1', '2', '3'}:
             return SymbolicAction(int(act_str))
         else:
             return None
 
     def string_to_action_help(self) -> str:
-        return "0 to increase the exponent"
+        return ("0 to increase the exponent\n"
+                "1 to multiply by 2 \n"
+                "2 to half\n"
+                "3 to add sin(x)")
 
     def visualize_state_goal(self, state: SymbolicState, goal: SymbolicGoal, fig: Figure) -> None:
         # can create a figure with the data points, and the function (state) overlaid
@@ -138,7 +143,7 @@ class SymbolicRegression(
         fig.add_axes(ax)
 
         # The state
-        xs = np.linspace(0.01, 1, 20)  # TODO: Change these values later, maybe more points
+        xs = np.linspace(0, 1, 20)  # TODO: Change these values later, maybe more points
         f = lambdify(x, state.expr, 'numpy')
         ys = f(xs)
         ax.plot(xs, ys)
