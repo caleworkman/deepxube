@@ -118,7 +118,7 @@ class SymbolicRegression(
         for state, goal in zip(states, goals):
             f = lambdify(x, state.expr, 'numpy')
             y_values = f(goal.xs)
-            within_tolerance = np.less(np.abs(goal.ys - y_values), tolerance)
+            within_tolerance = np.less_equal(np.abs(goal.ys - y_values), tolerance)
             solved.append(np.all(within_tolerance))
         return solved
 
