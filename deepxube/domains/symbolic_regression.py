@@ -1,7 +1,8 @@
+from random import randint
 from typing import List, Optional, Any
 
 from deepxube.base.factory import Parser
-from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, StateGoalVizable
+from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, StateGoalVizable, A
 from deepxube.factories.domain_factory import domain_factory
 
 import numpy as np
@@ -55,7 +56,7 @@ class SymbolicAction(Action):
 
 @domain_factory.register_class('symbolic_regression')
 class SymbolicRegression(
-    ActsEnumFixed[SymbolicState, SymbolicAction, SymbolicGoal], # ActsEnum; can limit to things like doubling or halving
+    ActsEnumFixed[SymbolicState, SymbolicAction, SymbolicGoal],
     StartGoalWalkable[SymbolicState, SymbolicAction, SymbolicGoal],
     StateGoalVizable[SymbolicState, SymbolicAction, SymbolicGoal],
     StringToAct[SymbolicState, SymbolicAction, SymbolicGoal]
@@ -63,20 +64,15 @@ class SymbolicRegression(
 
     def __init__(self, random_walk_length: int):
         # Test: python -m deepxube viz --domain symbolic_regression.1
-        # use random walk to generate the start statesrandom
         super().__init__()
-        self.actions_fixed: List[SymbolicAction] = [SymbolicAction(n) for n in [0]]
         self.random_walk_length = random_walk_length
+        self.actions_fixed = [SymbolicAction(n) for n in range(0, 4)]
 
-    def sample_start_states(self, num_states: int) -> List[SymbolicState]:
-        # Start with f(x) = x
-        # Do different random walks
-        return num_states * [SymbolicState(x)]
-        # TODO: Variety in start/goal pairs.
-        # 1. Sample start state from empty function (generate goal pairs by evaluating the function)
-        # 2. Random walk - pick an action and do it
-        # 3. Sample this next state
-        # 4. Repeat num_states times
+    def sample_start_states(self, walk_length: int) -> List[SymbolicState]:
+        states = [SymbolicState(x)]
+        for _ in range(walk_length):
+            states, _ = self.next_state(states, self.actions_fixed)
+        return states
 
     def sample_goal_from_state(self, states_start: Optional[list[SymbolicState]], states_goal: list[SymbolicState]) -> list[SymbolicGoal]:
         noise = 0  # TODO: Introduce noise later
@@ -91,30 +87,30 @@ class SymbolicRegression(
         return goals
 
     def get_actions_fixed(self) -> List[SymbolicAction]:
-        # ActsEnum will implement a different function isntead of this one
-        # ActsEnum will depend on the state, so it can look at the expr
         return self.actions_fixed.copy()
 
     def next_state(self, states: list[SymbolicState], actions: list[SymbolicAction]) -> tuple[list[SymbolicState], list[float]]:
         states_next: List[SymbolicState] = []
 
-        # Should we simplify the expressions every time? Exploit this later; for now do not simplify
-
-        # work on one "x" at a time; this should let us limit the action space
-        # restricting the action space
-        # i.e. only work on coeff of the most recent term introduced
-        # look into fitting polynomials;
-
         for state, action in zip(states, actions):
+            # choose which term to work on
+            terms = list(state.expr.args)
 
-            if action.action == 0:
-                new_expr = state.expr * x
-            elif action.action == 1:
-                new_expr = state.expr * 2
-            elif action.action == 2:
-                new_expr = state.expr * 1/2
-            elif action.action == 3:
-                new_expr = state.expr + sin(x)
+            # Terms will be 0 if there is one term, and >2 if there are more terms. Never 1.
+            if len(terms) > 1:
+                idx = randint(0, len(terms)-1)
+
+                if action.action == 0:
+                    terms[idx] = terms[idx] + x
+                elif action.action == 1:
+                    terms[idx] = terms[idx] * 2
+                elif action.action == 2:
+                    terms[idx] = terms[idx] * 1/2
+                elif action.action == 3:
+                    terms[idx] = terms[idx] * x
+                new_expr = state.expr.func(*terms)
+            else:
+                new_expr = state.expr + 0.01
 
             states_next.append(SymbolicState(new_expr))
         return states_next, [1.0] * len(states_next)
@@ -139,10 +135,10 @@ class SymbolicRegression(
             return None
 
     def string_to_action_help(self) -> str:
-        return ("0 to increase the exponent\n"
+        return ("0 to add x\n"
                 "1 to multiply by 2 \n"
                 "2 to half\n"
-                "3 to add sin(x)")
+                "3 to multiply by x")
 
     def visualize_state_goal(self, state: SymbolicState, goal: SymbolicGoal, fig: Figure) -> None:
         # can create a figure with the data points, and the function (state) overlaid
@@ -159,13 +155,13 @@ class SymbolicRegression(
         ax.plot(xs, ys)
         fig.add_axes(ax)
 
-        ax.legend(['goal', 'state'])
+        ax.legend(['goal', state.expr])
 
 
 @domain_factory.register_parser("symbolic_regression")
 class SymbolicParser(Parser):
     def parse(self, args_str: str) -> dict[str, Any]:
-        return {"num_start_states": int(args_str)}
+        return {"random_walk_length": int(args_str)}
 
     def help(self) -> str:
         return "An integer number of start states to generate through a random walk.'"
