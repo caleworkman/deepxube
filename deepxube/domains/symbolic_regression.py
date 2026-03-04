@@ -12,10 +12,8 @@ from sympy.abc import x
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-from deepxube.utils.timing_utils import Times
+from enum import IntEnum
 
-
-# pickle file has the start states and goals for examples
 
 class SymbolicState(State):
     def __init__(self, expression: Expr):
@@ -40,20 +38,29 @@ class SymbolicGoal(Goal):
         self.tolerance = tolerance
 
 
+class SymbolicActionEnum(IntEnum):
+    ADD = 0
+    MULTIPLY = 1
+
+
 class SymbolicAction(Action):
-    def __init__(self, action: int):
+    def __init__(self, term: int, action: SymbolicActionEnum, value: float | Symbol):
+        """The term in the expression to modify; -1 means modify the entire expression."""
+        self.term = term
         self.action = action
+        self.value = value   # the value to use to
 
     def __hash__(self) -> int:
-        return self.action
+        # TODO: how to hash the term? There will never be 1000 possible actions
+        return 1000*self.term + self.action
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SymbolicAction):
-            return self.action == other.action
+            return self.action == other.action and self.term == other.term
         return NotImplemented
 
     def __repr__(self) -> str:
-        return f"{self.action}"
+        return f"Term Index: {self.term}, Action: {self.action}"
 
 
 @domain_factory.register_class('symbolic_regression')
@@ -65,7 +72,7 @@ class SymbolicRegression(
 ):
 
     def __init__(self, random_walk_length: int):
-        # Test: python -m deepxube viz --domain symbolic_regression.1
+        # Test: python -m deepxube viz --domain symbolic_regression.1 --steps 5
         super().__init__()
         self.random_walk_length = random_walk_length
 
@@ -80,58 +87,37 @@ class SymbolicRegression(
 
         goals = []
         for state in states_goal:
+            print('Goal: ', state.expr)
             f = lambdify(x, state.expr, 'numpy')
             ys = f(xs)
             goals.append(SymbolicGoal(xs=xs, ys=ys, tolerance=0))
         return goals
 
-    # TODO: How to implement it so the start state and the goal state in the example are different?
-    # def sample_start_goal_pairs(self, num_steps_l: list[int], times: Optional[Times] = None) -> tuple[list[SymbolicState], list[SymbolicGoal]]:
-    #     print('pairs')
-    #     start_states = [SymbolicState(x)]
-    #     goals = self.random_walk(start_states, num_steps_l)
-    #     return start_states, goals
-
     def get_actions_fixed(self) -> List[SymbolicAction]:
-        return [SymbolicAction(n) for n in range(0, 5)]
+        return [SymbolicAction(term=1, action=n, value=1) for n in range(0, len(SymbolicActionEnum))]
 
     def next_state(self, states: list[SymbolicState], actions: list[SymbolicAction]) -> tuple[list[SymbolicState], list[float]]:
         states_next: List[SymbolicState] = []
 
         for state, action in zip(states, actions):
-            # Terms will be length 0 if there is one term, and >2 if there are more terms. Never 1.
             terms = list(state.expr.args)
-            print('terms', terms)
-            if len(terms) > 1:
-                print('more than 1')
-                idx = randint(0, len(terms)-1)
-                terms[idx] = self._apply_action(terms[idx], action.action)
-                new_expr = state.expr.func(*terms)
+            if action.term < 0 or len(terms) < 2:
+                # apply to entire expression
+                new_expr = self._apply_action(state.expr, action.action, action.value)
             else:
-                print('one term')
-                new_expr = self._apply_action(state.expr, action.action)
+                terms[action.term] = self._apply_action(terms[action.term], action.action, action.value)
+                new_expr = state.expr.func(*terms)
 
-            states_next.append(SymbolicState(new_expr))
+            states_next.append(SymbolicState(simplify(new_expr)))
         return states_next, [1.0] * len(states_next)
 
     @staticmethod
-    def _apply_action(term, action: int):
+    def _apply_action(term, action: SymbolicActionEnum, value: float):
         """Apply a sympy manipulation to a term of an expression."""
-        if action == 0:
-            # Add an integer
-            return term + 1
-        elif action == 1:
-            # Add an x
-            return term + x
-        elif action == 2:
-            # Multiply
-            return term * 2
-        elif action == 3:
-            # Divide
-            return term * 1 / 2
-        elif action == 4:
-            # Increase degree of term (e.g. x -> x^2)
-            return term * x
+        if action == SymbolicActionEnum.ADD:
+            return term + value
+        elif action == SymbolicActionEnum.MULTIPLY:
+            return term * value
         else:
             raise ValueError('Bad action choice')
 
@@ -149,17 +135,18 @@ class SymbolicRegression(
 
     def string_to_action(self, act_str: str) -> Optional[SymbolicAction]:
         # Just for visualization
-        if act_str in {'0', '1', '2', '3', '4'}:
-            return SymbolicAction(int(act_str))
-        else:
-            return None
+        # TODO: make this better, check format and number of valid terms
+        terms = act_str.split(',')
+        return SymbolicAction(
+            term=int(terms[0]),
+            action=int(terms[1]),
+            value=symbols(terms[2]) if isinstance(terms[2], str) else float(terms[2])
+        )
 
     def string_to_action_help(self) -> str:
-        return ("0 to add 1\n"
-                "1 to add x\n"
-                "2 to multiply by 2 \n"
-                "3 to half\n"
-                "4 to multiply by x")
+        return ("Enter as <term>,<action>,<value>; term = -1 operates on the entire expression\n"
+                "0 to add\n"
+                "1 to multiply\n")
 
     def visualize_state_goal(self, state: SymbolicState, goal: SymbolicGoal, fig: Figure) -> None:
         # can create a figure with the data points, and the function (state) overlaid
