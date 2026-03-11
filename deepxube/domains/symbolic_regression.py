@@ -1,8 +1,13 @@
 from typing import List, Optional, Any
 
+from numpy._typing import NDArray
+
 from deepxube.base.factory import Parser
-from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, StateGoalVizable, A
+from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, StateGoalVizable
+from deepxube.base.nnet_input import StateGoalIn, G
+
 from deepxube.factories.domain_factory import domain_factory
+from deepxube.factories.nnet_input_factory import register_nnet_input
 
 import numpy as np
 from sympy import *
@@ -47,7 +52,7 @@ class SymbolicAction(Action):
         """The term in the expression to modify; -1 means modify the entire expression."""
         self.term = term
         self.action = action
-        self.value = value   # the value to use to
+        self.value = value   # the value to add/multiply/etc to the expression or term
 
     def __hash__(self) -> int:
         # TODO: how to hash the term? There will never be 1000 possible actions
@@ -173,6 +178,14 @@ class SymbolicParser(Parser):
     def help(self) -> str:
         return "An integer number of start states to generate through a random walk.'"
 
+
+@register_nnet_input("symbolic_regression", "symbolic_regression_nnet_input")
+class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState, SymbolicGoal]):
+    def get_input_info(self) -> Any:
+        pass
+
+    def to_np(self, states: List[S], goals: List[G]) -> List[NDArray]:
+        pass
 
 # For NN, may need to implement a different structure than Grid/Cube
 # For example, our inputs here are flat. Maybe Transformer
