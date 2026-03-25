@@ -18,11 +18,7 @@ class TestSymbolicRegression(unittest.TestCase):
         goal_state = SymbolicState(expression=x+1)
 
         # Add 1 to the entire expression
-        action = SymbolicAction(
-            term=-1,
-            action=SymbolicActionEnum.ADD,
-            value=1
-        )
+        action = SymbolicAction(term=-1, action=SymbolicActionEnum.ADD_1)
 
         next_states = self.regr.next_state(
             states=[start_state],
@@ -32,22 +28,24 @@ class TestSymbolicRegression(unittest.TestCase):
         self.assertEqual(next_states[0], goal_state)
 
     def test_add_to_entire_expression_with_one_term(self):
-        """Test adding to an expression using the -1 term index, where the expression is only one term."""
-        values_to_add = [1, 2, 1/2, x]
-        goal_states = [
-            SymbolicState(x+1),
-            SymbolicState(x+2),
-            SymbolicState(x+0.5),
-            SymbolicState(Integer(2) * x)
+        """Test adding and subtracting to an expression using -1 term index, where the expression is only one term."""
+        actions = [
+            SymbolicActionEnum.ADD_1,
+            SymbolicActionEnum.ADD_X,
+            SymbolicActionEnum.SUBTRACT_1,
+            SymbolicActionEnum.SUBTRACT_X
         ]
+        actions = [SymbolicAction(term=-1, action=action) for action in actions]
 
         start_state = SymbolicState(expression=x)
-        start_states = len(values_to_add) * [start_state]
-        actions = [SymbolicAction(
-            term=-1,
-            action=SymbolicActionEnum.ADD,
-            value=value
-        ) for value in values_to_add]
+        start_states = len(actions) * [start_state]
+
+        goal_states = [
+            SymbolicState(x+1),
+            SymbolicState(Integer(2) * x),
+            SymbolicState(x - 1),
+            SymbolicState(0)
+        ]
 
         next_states, costs = self.regr.next_state(start_states, actions)
 
@@ -55,22 +53,24 @@ class TestSymbolicRegression(unittest.TestCase):
             self.assertEqual(state, goal)
 
     def test_add_to_entire_expression_with_two_terms(self):
-        """Test adding to an expression using the -1 term index, where the expression as two terms."""
-        values_to_add = [1, 2, 1/2, x]
-        goal_states = [
-            SymbolicState(x+2),
-            SymbolicState(x+3),
-            SymbolicState(x+1.5),
-            SymbolicState(Integer(2) * x + 1)
+        """Test adding and subtracting to an expression using the -1 term index, where the expression has two terms."""
+        actions = [
+            SymbolicActionEnum.ADD_1,
+            SymbolicActionEnum.ADD_X,
+            SymbolicActionEnum.SUBTRACT_1,
+            SymbolicActionEnum.SUBTRACT_X
         ]
+        actions = [SymbolicAction(term=-1, action=action) for action in actions]
 
         start_state = SymbolicState(expression=x+1)
-        start_states = len(values_to_add) * [start_state]
-        actions = [SymbolicAction(
-            term=-1,
-            action=SymbolicActionEnum.ADD,
-            value=value
-        ) for value in values_to_add]
+        start_states = len(actions) * [start_state]
+
+        goal_states = [
+            SymbolicState(x+2),
+            SymbolicState(Integer(2) * x + 1),
+            SymbolicState(x),
+            SymbolicState(1)
+        ]
 
         next_states, costs = self.regr.next_state(start_states, actions)
 
@@ -78,26 +78,26 @@ class TestSymbolicRegression(unittest.TestCase):
             self.assertEqual(state, goal)
 
     def test_add_to_first_term(self):
-        """Test adding values to the first term in the expression."""
-
-        values_to_add = [1, 2, 1/2, x]
-        goal_states = [
-            SymbolicState(x+2),
-            SymbolicState(x+3),
-            SymbolicState(x+1.5),
-            SymbolicState(Integer(2) * x + 1)
+        """Test adding and subtracting values to the first term in the expression."""
+        actions = [
+            SymbolicActionEnum.ADD_1,
+            SymbolicActionEnum.ADD_X,
+            SymbolicActionEnum.SUBTRACT_1,
+            SymbolicActionEnum.SUBTRACT_X
         ]
+        actions = [SymbolicAction(term=0, action=action) for action in actions]
 
         start_state = SymbolicState(expression=x+1)
-        start_states = len(values_to_add) * [start_state]
+        start_states = len(actions) * [start_state]
 
         # The terms are not always in the order as shown in the expression
         # Term 0 corresponds to the "1" in "x + 1"
-        actions = [SymbolicAction(
-            term=0,
-            action=SymbolicActionEnum.ADD,
-            value=value
-        ) for value in values_to_add]
+        goal_states = [
+            SymbolicState(x+2),
+            SymbolicState(Integer(2) * x + 1),
+            SymbolicState(x),
+            SymbolicState(1)
+        ]
 
         next_states, costs = self.regr.next_state(start_states, actions)
 
@@ -105,24 +105,24 @@ class TestSymbolicRegression(unittest.TestCase):
             self.assertEqual(state, goal)
 
     def test_multiply_entire_expression(self):
-        """Test multiplying the entire expression."""
-
-        values_to_mul = [1, 2, 1 / 2, x]
-        goal_states = [
-            SymbolicState(x + 1),
-            SymbolicState(2 * x + 2),
-            SymbolicState(0.5 * x + 0.5),
-            SymbolicState(x**2 + x)
+        """Test multiplying and dividing the entire expression."""
+        actions = [
+            SymbolicActionEnum.MULTIPLY_BY_2,
+            SymbolicActionEnum.MULTIPLY_BY_X,
+            SymbolicActionEnum.DIVIDE_BY_2,
+            SymbolicActionEnum.DIVIDE_BY_X
         ]
+        actions = [SymbolicAction(term=-1, action=action) for action in actions]
 
         start_state = SymbolicState(expression=x + 1)
-        start_states = len(values_to_mul) * [start_state]
+        start_states = len(actions) * [start_state]
 
-        actions = [SymbolicAction(
-            term=-1,
-            action=SymbolicActionEnum.MULTIPLY,
-            value=value
-        ) for value in values_to_mul]
+        goal_states = [
+            SymbolicState(2*x + 2),
+            SymbolicState(x**2 + x),
+            SymbolicState(x/2 + 1/2),
+            SymbolicState(1 + 1/x)
+        ]
 
         next_states, costs = self.regr.next_state(start_states, actions)
 
@@ -131,23 +131,23 @@ class TestSymbolicRegression(unittest.TestCase):
 
     def test_multiply_first_term(self):
         """Test multiplying the first term, 0th index operates on the "1" in "x+1"."""
-
-        values_to_mul = [1, 2, 1 / 2, x]
-        goal_states = [
-            SymbolicState(x + 1),
-            SymbolicState(x + 2),
-            SymbolicState(x + 0.5),
-            SymbolicState(2*x)
+        actions = [
+            SymbolicActionEnum.MULTIPLY_BY_2,
+            SymbolicActionEnum.MULTIPLY_BY_X,
+            SymbolicActionEnum.DIVIDE_BY_2,
+            SymbolicActionEnum.DIVIDE_BY_X
         ]
+        actions = [SymbolicAction(term=0, action=action) for action in actions]
 
         start_state = SymbolicState(expression=x + 1)
-        start_states = len(values_to_mul) * [start_state]
+        start_states = len(actions) * [start_state]
 
-        actions = [SymbolicAction(
-            term=0,
-            action=SymbolicActionEnum.MULTIPLY,
-            value=value
-        ) for value in values_to_mul]
+        goal_states = [
+            SymbolicState(x + 2),
+            SymbolicState(2*x),
+            SymbolicState(x + 1/2),
+            SymbolicState(x + 1/x)
+        ]
 
         next_states, costs = self.regr.next_state(start_states, actions)
 
@@ -156,23 +156,23 @@ class TestSymbolicRegression(unittest.TestCase):
 
     def test_multiply_second_term(self):
         """Test multiplying the second term, 1st index operates on the "x" in "x+1"."""
-
-        values_to_mul = [1, 2, 1 / 2, x]
-        goal_states = [
-            SymbolicState(x + 1),
-            SymbolicState(2*x + 1),
-            SymbolicState(0.5 * x + 1),
-            SymbolicState(x**2 + 1)
+        actions = [
+            SymbolicActionEnum.MULTIPLY_BY_2,
+            SymbolicActionEnum.MULTIPLY_BY_X,
+            SymbolicActionEnum.DIVIDE_BY_2,
+            SymbolicActionEnum.DIVIDE_BY_X
         ]
+        actions = [SymbolicAction(term=1, action=action) for action in actions]
 
         start_state = SymbolicState(expression=x + 1)
-        start_states = len(values_to_mul) * [start_state]
+        start_states = len(actions) * [start_state]
 
-        actions = [SymbolicAction(
-            term=1,
-            action=SymbolicActionEnum.MULTIPLY,
-            value=value
-        ) for value in values_to_mul]
+        goal_states = [
+            SymbolicState(2*x + 1),
+            SymbolicState(x**2 + 1),
+            SymbolicState(x/2 + 1),
+            SymbolicState(2)
+        ]
 
         next_states, costs = self.regr.next_state(start_states, actions)
 

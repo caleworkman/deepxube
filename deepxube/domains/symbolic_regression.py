@@ -16,7 +16,7 @@ from sympy.abc import x
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-from enum import IntEnum
+from enum import IntEnum, auto
 
 
 class SymbolicState(State):
@@ -43,16 +43,30 @@ class SymbolicGoal(Goal):
 
 
 class SymbolicActionEnum(IntEnum):
-    ADD = 0
-    MULTIPLY = 1
+    ADD_1 = auto()
+    ADD_X = auto()
+
+    SUBTRACT_1 = auto()
+    SUBTRACT_X = auto()
+
+    MULTIPLY_BY_2 = auto()
+    MULTIPLY_BY_X = auto()
+
+    DIVIDE_BY_2 = auto()
+    DIVIDE_BY_X = auto()
 
 
 class SymbolicAction(Action):
-    def __init__(self, term: int, action: SymbolicActionEnum, value: float | Symbol):
-        """The term in the expression to modify; -1 means modify the entire expression."""
+    def __init__(self, term: int, action: SymbolicActionEnum, value: float | Symbol = None):
+        """An action
+
+        :param int term: The term in the expression to modify; -1 modifies the entire expression.
+        :param SymbolicActionEnum action: The action to take
+        :param float | symbol value: The value to add/multiply/etc to the expression/term
+        """
         self.term = term
         self.action = action
-        self.value = value   # the value to add/multiply/etc to the expression or term
+        # self.value = value # don't do this yet
 
     def __hash__(self) -> int:
         # TODO: how to hash the term? There will never be 1000 possible actions
@@ -107,21 +121,38 @@ class SymbolicRegression(
             terms = list(state.expr.args)
             if action.term < 0 or len(terms) < 2:
                 # apply to entire expression
-                new_expr = self._apply_action(state.expr, action.action, action.value)
+                new_expr = self._apply_action(state.expr, action.action)
             else:
-                terms[action.term] = self._apply_action(terms[action.term], action.action, action.value)
+                terms[action.term] = self._apply_action(terms[action.term], action.action)
                 new_expr = state.expr.func(*terms)
 
             states_next.append(SymbolicState(simplify(new_expr)))
         return states_next, [1.0] * len(states_next)
 
     @staticmethod
-    def _apply_action(term, action: SymbolicActionEnum, value: float):
+    def _apply_action(term, action: SymbolicActionEnum):
         """Apply a sympy manipulation to a term of an expression."""
-        if action == SymbolicActionEnum.ADD:
-            return term + value
-        elif action == SymbolicActionEnum.MULTIPLY:
-            return term * value
+        # Don't do it this way yet, instead specify the value in the Enum - 3/24/26
+        if action == SymbolicActionEnum.ADD_1:
+            return term + 1
+        elif action == SymbolicActionEnum.ADD_X:
+            return term + x
+
+        elif action == SymbolicActionEnum.SUBTRACT_1:
+            return term - 1
+        elif action == SymbolicActionEnum.SUBTRACT_X:
+            return term - x
+
+        elif action == SymbolicActionEnum.MULTIPLY_BY_2:
+            return term * 2
+        elif action == SymbolicActionEnum.MULTIPLY_BY_X:
+            return term * x
+
+        elif action == SymbolicActionEnum.DIVIDE_BY_2:
+            return term / 2
+        elif action == SymbolicActionEnum.DIVIDE_BY_X:
+            return term / x
+
         else:
             raise ValueError('Bad action choice')
 
@@ -144,7 +175,7 @@ class SymbolicRegression(
         return SymbolicAction(
             term=int(terms[0]),
             action=int(terms[1]),
-            value=symbols(terms[2]) if isinstance(terms[2], str) else float(terms[2])
+            # value=symbols(terms[2]) if isinstance(terms[2], str) else float(terms[2])
         )
 
     def string_to_action_help(self) -> str:
