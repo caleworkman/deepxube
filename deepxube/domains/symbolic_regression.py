@@ -55,6 +55,8 @@ class SymbolicActionEnum(IntEnum):
     DIVIDE_BY_2 = auto()
     DIVIDE_BY_X = auto()
 
+    MULTIPLY_BY_NEG_1 = auto()
+
 
 class SymbolicAction(Action):
     def __init__(self, term: int, action: SymbolicActionEnum, value: float | Symbol = None):
@@ -112,7 +114,7 @@ class SymbolicRegression(
         return goals
 
     def get_actions_fixed(self) -> List[SymbolicAction]:
-        return [SymbolicAction(term=1, action=n, value=1) for n in range(0, len(SymbolicActionEnum))]
+        return [SymbolicAction(term=1, action=n) for n in range(0, len(SymbolicActionEnum))]
 
     def next_state(self, states: list[SymbolicState], actions: list[SymbolicAction]) -> tuple[list[SymbolicState], list[float]]:
         states_next: List[SymbolicState] = []
@@ -153,6 +155,9 @@ class SymbolicRegression(
         elif action == SymbolicActionEnum.DIVIDE_BY_X:
             return term / x
 
+        elif action == SymbolicActionEnum.MULTIPLY_BY_NEG_1:
+            return -1 * term
+
         else:
             raise ValueError('Bad action choice')
 
@@ -179,9 +184,7 @@ class SymbolicRegression(
         )
 
     def string_to_action_help(self) -> str:
-        return ("Enter as <term>,<action>,<value>; term = -1 operates on the entire expression\n"
-                "0 to add\n"
-                "1 to multiply\n")
+        return '\n'.join([f'{a.value}: {a.name}' for a in SymbolicActionEnum])
 
     def visualize_state_goal(self, state: SymbolicState, goal: SymbolicGoal, fig: Figure) -> None:
         # can create a figure with the data points, and the function (state) overlaid

@@ -178,3 +178,19 @@ class TestSymbolicRegression(unittest.TestCase):
 
         for state, goal in zip(next_states, goal_states):
             self.assertEqual(state, goal)
+
+    def test_multiply_by_negative_one(self):
+        """Test multiplying by negative 1."""
+        actions = [SymbolicAction(term=-1, action=SymbolicActionEnum.MULTIPLY_BY_NEG_1)]
+
+        start_state = SymbolicState(expression=x + 1)
+        start_states = len(actions) * [start_state]
+
+        goal_states = [
+            SymbolicState(-x - 1)
+        ]
+
+        next_states, costs = self.regr.next_state(start_states, actions)
+
+        for state, goal in zip(next_states, goal_states):
+            self.assertEqual(state, goal)
