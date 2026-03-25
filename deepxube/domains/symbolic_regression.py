@@ -3,7 +3,7 @@ from typing import List, Optional, Any
 from numpy._typing import NDArray
 
 from deepxube.base.factory import Parser
-from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StringToAct, StateGoalVizable
+from deepxube.base.domain import State, Action, Goal, ActsEnum, StartGoalWalkable, StringToAct, StateGoalVizable, A
 from deepxube.base.nnet_input import StateGoalIn, G
 
 from deepxube.factories.domain_factory import domain_factory
@@ -85,7 +85,7 @@ class SymbolicAction(Action):
 
 @domain_factory.register_class('symbolic_regression')
 class SymbolicRegression(
-    ActsEnumFixed[SymbolicState, SymbolicAction, SymbolicGoal],
+    ActsEnum[SymbolicState, SymbolicAction, SymbolicGoal],
     StartGoalWalkable[SymbolicState, SymbolicAction, SymbolicGoal],
     StateGoalVizable[SymbolicState, SymbolicAction, SymbolicGoal],
     StringToAct[SymbolicState, SymbolicAction, SymbolicGoal]
@@ -113,8 +113,31 @@ class SymbolicRegression(
             goals.append(SymbolicGoal(xs=xs, ys=ys, tolerance=0))
         return goals
 
-    def get_actions_fixed(self) -> List[SymbolicAction]:
-        return [SymbolicAction(term=1, action=n) for n in range(0, len(SymbolicActionEnum))]
+    # def get_actions_fixed(self) -> List[SymbolicAction]:
+    #     return [SymbolicAction(term=1, action=n) for n in range(0, len(SymbolicActionEnum))]
+
+    def get_state_actions(self, states: list[SymbolicState]) -> list[list[SymbolicAction]]:
+        # TODO: This is causing some issue
+        list_of_list_of_actions = []
+
+        for state in states:
+            state_actions = []
+            num_terms = len(state.expr.args)
+
+            if num_terms < 2:
+                state_actions.append(
+                    [SymbolicAction(t, a) for a in SymbolicActionEnum for t in [-1]]
+                )
+            else:
+                term_idxs = [-1] + list(range(num_terms))
+                state_actions.append(
+                    [SymbolicAction(t, a) for a in SymbolicActionEnum for t in term_idxs]
+                )
+            print(state_actions)
+
+            list_of_list_of_actions.append(state_actions)
+
+        return list_of_list_of_actions
 
     def next_state(self, states: list[SymbolicState], actions: list[SymbolicAction]) -> tuple[list[SymbolicState], list[float]]:
         states_next: List[SymbolicState] = []
@@ -134,7 +157,6 @@ class SymbolicRegression(
     @staticmethod
     def _apply_action(term, action: SymbolicActionEnum):
         """Apply a sympy manipulation to a term of an expression."""
-        # Don't do it this way yet, instead specify the value in the Enum - 3/24/26
         if action == SymbolicActionEnum.ADD_1:
             return term + 1
         elif action == SymbolicActionEnum.ADD_X:
