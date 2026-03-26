@@ -14,7 +14,7 @@ import pickle
 import pathlib
 import tarfile
 import os
-import wget  # type: ignore
+# import wget  # type: ignore
 from filelock import FileLock
 
 
@@ -150,7 +150,7 @@ class Sokoban(ActsEnumFixed[SkState, SkAction, SkGoal], StartGoalWalkable[SkStat
                         os.makedirs(data_dir)
 
                     tar_gz_file_name = f"{data_dir}/sokoban.tar.gz"
-                    wget.download(data_download_link, tar_gz_file_name, bar=None)
+                    # wget.download(data_download_link, tar_gz_file_name, bar=None)
                     tar_gz_file = tarfile.open(tar_gz_file_name)
                     print("Uncompressing data")
                     tar_gz_file.extractall(data_dir)
