@@ -67,9 +67,32 @@ class StateGoalActIn(NNetInput[D], Generic[D, S, G, A]):
         pass
 
 
+class PolicyNNetIn(NNetInput[D], Generic[D, S, G, A]):
+    @abstractmethod
+    def to_np(self, states: List[S], goals: List[G], actions: List[A]) -> List[NDArray]:
+        pass
+
+    @abstractmethod
+    def to_np_fn(self, states: List[S], goals: List[G]) -> List[NDArray]:
+        pass
+
+    @abstractmethod
+    def nnet_out_to_actions(self, nnet_out: NDArray[np.float64]) -> List[A]:
+        pass
+
+
+class FlatInPolicy(FlatIn[D], PolicyNNetIn[D, S, G, A], ABC):
+    pass
+
+
 # Env mixins for inputs
 class DynamicNNetInput(Domain[S, A, G], ABC):
     _nnet_input_register: ClassVar[Dict[str, Type[NNetInput]]] = dict()
+
+    def __init_subclass__(cls, **kwargs: Any):
+        super().__init_subclass__(**kwargs)
+        # Create a fresh dict for THIS subclass
+        cls._nnet_input_register = {}
 
     @classmethod
     def register_nnet_input(cls, nnet_input_t: Type[NNetInput], nnet_input_name: str) -> None:

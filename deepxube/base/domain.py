@@ -74,10 +74,10 @@ class Domain(ABC, Generic[S, A, G]):
         self.nnet_pars: List[Tuple[str, str, NNetPar]] = []
 
     @abstractmethod
-    def sample_start_goal_pairs(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
+    def sample_problem_instances(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
         """ Return start goal pairs with num_steps_l between start and goal
 
-        :param num_steps_l: Number of steps to take between start and goal
+        :param num_steps_l: Number of steps to take between start and goal. Does not have to directly correspond to number of steps and can also be ignored.
         :param times: Times that can be used to profile code
         :return: List of start states and list of goals
         """
@@ -345,13 +345,13 @@ class GoalFixed(GoalSampleable[S, A, G]):
 class GoalStateGoalPairSampleable(Domain[S, A, G]):
     """ Can sample pairs of states and corresponding goals of which the sampled state is a member """
     @abstractmethod
-    def sample_goal_state_goal_pairs(self, num: int) -> Tuple[List[S], List[G]]:
+    def sample_goalstate_goal_pairs(self, num: int) -> Tuple[List[S], List[G]]:
         pass
 
 
 class GoalStateSampGoalSamp(GoalStateGoalPairSampleable[S, A, G], GoalStateSampleable[S, A, G], GoalSampleableFromState[S, A, G], ABC):
     """ Sample goal state and then sample goals from goal states """
-    def sample_goal_state_goal_pairs(self, num: int) -> Tuple[List[S], List[G]]:
+    def sample_goalstate_goal_pairs(self, num: int) -> Tuple[List[S], List[G]]:
         states_goal: List[S] = self.sample_goal_states(num)
         goals: List[G] = self.sample_goal_from_state(None, states_goal)
         return states_goal, goals
@@ -359,7 +359,7 @@ class GoalStateSampGoalSamp(GoalStateGoalPairSampleable[S, A, G], GoalStateSampl
 
 class GoalSampGoalStateSamp(GoalStateGoalPairSampleable[S, A, G], GoalSampleable[S, A, G], StateSampleableFromGoal[S, A, G], ABC):
     """ Sample goals and then sample goal states from goals """
-    def sample_goal_state_goal_pairs(self, num: int) -> Tuple[List[S], List[G]]:
+    def sample_goalstate_goal_pairs(self, num: int) -> Tuple[List[S], List[G]]:
         goals: List[G] = self.sample_goals(num)
         states_goal: List[S] = self.sample_state_from_goal(goals)
         return states_goal, goals
@@ -378,7 +378,7 @@ class StartGoalWalkable(GoalSampleableFromState[S, A, G]):
         """
         pass
 
-    def sample_start_goal_pairs(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
+    def sample_problem_instances(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
         # Initialize
         if times is None:
             times = Times()
@@ -402,15 +402,15 @@ class StartGoalWalkable(GoalSampleableFromState[S, A, G]):
 
 
 class GoalStartRevWalkable(GoalStateGoalPairSampleable[S, A, G]):
-    def sample_start_goal_pairs(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
+    def sample_problem_instances(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
         # Initialize
         if times is None:
             times = Times()
 
         # goals
         start_time = time.time()
-        states_goal, goals = self.sample_goal_state_goal_pairs(len(num_steps_l))
-        times.record_time("sample_goal_state_goal_pairs", time.time() - start_time)
+        states_goal, goals = self.sample_goalstate_goal_pairs(len(num_steps_l))
+        times.record_time("sample_goalstate_goal_pairs", time.time() - start_time)
 
         # random walk to get start states
         start_time = time.time()
@@ -479,12 +479,8 @@ class NextStateNP(Domain[S, A, G]):
         pass
 
     @abstractmethod
-    def _get_state_np_actions(self, states_np_l: List[NDArray]) -> List[List[A]]:
-        pass
-
     def _sample_state_np_action(self, states_np: List[NDArray]) -> List[A]:
-        state_actions_l: List[List[A]] = self._get_state_np_actions(states_np)
-        return [random.choice(state_actions) for state_actions in state_actions_l]
+        pass
 
     @abstractmethod
     def _next_state_np(self, states_np: List[NDArray], actions: List[A]) -> Tuple[List[NDArray], List[float]]:
@@ -536,10 +532,19 @@ class NextStateNPActsEnum(NextStateNP[S, A, G], ActsEnum[S, A, G], ABC):
         return states_exp_l, actions_exp_l, tcs_l
 
 
+class NextStateNPActsFixed(NextStateNP[S, A, G], ActsFixed[S, A, G], ABC):
+    def _sample_state_np_action(self, states_np: List[NDArray]) -> List[A]:
+        return self.sample_action(states_np[0].shape[0])
+
+
 class NextStateNPActsEnumFixed(NextStateNPActsEnum[S, A, G], ActsEnumFixed[S, A, G], ABC):
     def _get_state_np_actions(self, states_np: List[NDArray]) -> List[List[A]]:
         state_actions: List[A] = self.get_actions_fixed()
         return [state_actions.copy() for _ in range(states_np[0].shape[0])]
+
+    def _sample_state_np_action(self, states_np: List[NDArray]) -> List[A]:
+        state_actions_l: List[List[A]] = self._get_state_np_actions(states_np)
+        return [random.choice(state_actions) for state_actions in state_actions_l]
 
 
 # PDDL Mixins
@@ -549,7 +554,7 @@ class SupportsPDDL(Domain[S, A, G], ABC):
         pass
 
     @abstractmethod
-    def state_goal_to_pddl_inst(self, state: S, goal: G) -> List[str]:
+    def prob_inst_to_pddl_inst(self, state: S, goal: G) -> List[str]:
         pass
 
     @abstractmethod

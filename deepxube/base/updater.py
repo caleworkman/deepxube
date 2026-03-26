@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Any, Generic, TypeVar, Optional, cast
+from typing import List, Dict, Tuple, Any, Generic, TypeVar, Optional, cast, Type
 from abc import ABC, abstractmethod
 import time
 from dataclasses import dataclass
@@ -11,18 +11,22 @@ import torch
 from numpy.typing import NDArray
 
 from deepxube.nnet.nnet_utils import NNetParInfo, NNetCallable, NNetPar, get_nnet_par_infos, start_nnet_fn_runners, stop_nnet_runners
-from deepxube.base.domain import Domain, Action
-from deepxube.base.heuristic import HeurNNetPar, HeurNNetParV, HeurNNetParQ, HeurFn, HeurFnV, HeurFnQ
-from deepxube.base.pathfinding import PathFind, PathFindHeur, PathFindSup, Instance, InstanceV, InstanceQ
+from deepxube.base.domain import Domain, State, Action, Goal, GoalSampleableFromState
+from deepxube.base.heuristic import HeurNNetPar, HeurNNetParV, HeurNNetParQ, HeurFn, HeurFnV, HeurFnQ, PolicyNNetPar, PolicyFn
+from deepxube.base.pathfinding import FNs, FNsP, FNsHV, FNsHQ, FNsHeur, PathFind, PathFindSup, Instance, InstanceNode, InstanceEdge, get_path, Node
 from deepxube.factories.pathfinding_factory import pathfinding_factory
 from deepxube.pathfinding.utils.performance import PathFindPerf, print_pathfindperf
+from deepxube.utils.command_line_utils import get_pathfind_name_kwargs
 from deepxube.utils.data_utils import SharedNDArray, np_to_shnd, get_nowait_noerr
-from deepxube.utils.misc_utils import split_evenly_w_max
+from deepxube.utils.misc_utils import split_evenly, split_evenly_w_max
 from deepxube.utils.timing_utils import Times
 import gc
 
 import copy
 from torch.multiprocessing import get_context
+
+
+FNsH = TypeVar('FNsH', bound=FNsHeur)
 
 
 # TODO par nnets per GPU?
@@ -36,6 +40,9 @@ class UpArgs:
     :param step_max: Maximum number of steps to take when generating problem instances.
     :param search_itrs: Maximum number of pathfinding iterationos to take for each generated problem instances
     States and corresponding goals seen during search will be added to training instances.
+    :param ub_heur_solns: if True, the target cost-to-go will be min(backup, path_cost_from_state)
+    :param backup: 1 is Bellman and -1 is tree backup (i.e. Limited Horizon Bellman-based Learning)
+    :param policy_rand_prob: Probability of sampling random actions for training policy (to prevent mode collapse)
     :param up_gen_itrs: How many iterations worth of data to generate per udpate. If None, set to up_itrs
     :param up_batch_size: Maximum number of searches to do at a time. Helps manage memory.
     Decrease if memory is running out during updater. None if as large as possible
@@ -48,6 +55,9 @@ class UpArgs:
     up_itrs: int
     step_max: int
     search_itrs: int
+    ub_heur_solns: bool = False
+    backup: int = 1
+    policy_rand_prob: float = 0.0
     up_gen_itrs: Optional[int] = None
     up_batch_size: Optional[int] = None
     nnet_batch_size: Optional[int] = None
@@ -56,16 +66,6 @@ class UpArgs:
 
     def get_up_gen_itrs(self) -> int:
         return self.up_itrs if (self.up_gen_itrs is None) else self.up_gen_itrs
-
-
-@dataclass
-class UpHeurArgs:
-    """ Arguments when updating heuristic
-    :param ub_heur_solns: if True, the target cost-to-go will be min(backup, path_cost_from_state)
-    :param backup: 1 is Bellman and -1 is tree backup (i.e. Limited Horizon Bellman-based Learning)
-    """
-    ub_heur_solns: bool
-    backup: int
 
 
 def _put_from_q(data_l: List[List[NDArray]], from_q: Queue, times: Times) -> None:
@@ -89,7 +89,22 @@ D = TypeVar('D', bound=Domain)
 P = TypeVar('P', bound=PathFind)
 
 
-class Update(Generic[D, P, Inst], ABC):
+class Update(Generic[D, FNs, P, Inst], ABC):
+    @staticmethod
+    @abstractmethod
+    def domain_type() -> Type[D]:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def functions_type() -> Type[FNs]:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def pathfind_type() -> Type[P]:
+        pass
+
     @staticmethod
     def _update_perf(insts: List[Inst], step_to_pathperf: Dict[int, PathFindPerf]) -> None:
         for inst in insts:
@@ -98,12 +113,14 @@ class Update(Generic[D, P, Inst], ABC):
                 step_to_pathperf[step_num_inst] = PathFindPerf()
             step_to_pathperf[step_num_inst].update_perf(inst)
 
-    def __init__(self, domain: D, pathfind_name: str, pathfind_kwargs: Dict[str, Any], up_args: UpArgs):
+    def __init__(self, domain: D, pathfind_arg: str, up_args: UpArgs):
         self.domain: D = domain
+        self.pathfind_arg: str = pathfind_arg
+        pathfind_name, pathfind_kwargs = get_pathfind_name_kwargs(pathfind_arg)
         self.pathfind_name: str = pathfind_name
         self.pathfind_kwargs: Dict[str, Any] = pathfind_kwargs
         self.up_args: UpArgs = up_args
-        self.targ_update_num: Optional[int] = None
+        self.targ_update_nums: Dict[str, int] = dict()
         self.nnet_par_dict: Dict[str, NNetPar] = dict()
         self.nnet_file_dict: Dict[str, str] = dict()
         for nnet_name, nnet_file, nnet_par in domain.get_nnet_pars():
@@ -160,7 +177,7 @@ class Update(Generic[D, P, Inst], ABC):
         self.q_id = q_id
         self.nnet_par_info_main = NNetParInfo(self.to_main_q, self.from_main_q, self.q_id)
 
-    def start_procs(self) -> Tuple[Queue, List[Queue]]:
+    def start_procs(self, rb_size: int) -> Tuple[Queue, List[Queue]]:
         # start updater procs
         # TODO implement safer copy?
         updaters: List[Update] = [copy.deepcopy(self) for _ in range(self.up_args.procs)]
@@ -177,27 +194,32 @@ class Update(Generic[D, P, Inst], ABC):
             for nnet_name in self.nnet_par_info_l_dict.keys():
                 updater.set_nnet_par_info(nnet_name, self.nnet_par_info_l_dict[nnet_name][proc_idx])
 
+        # get rb sizes
+        rb_sizes_q: List[int] = [0] * len(updaters)
+        if rb_size > 0:
+            rb_sizes_q = split_evenly(rb_size, len(updaters))
+            assert min(rb_sizes_q) > 0, "Number of processes must not exceed that of the size of the replay buffer"
+
+        # start procs
         self.to_q = ctx.Queue()
         self.from_q = ctx.Queue()
         self.procs = []
-
-        for updater in updaters:
-            proc: BaseProcess = ctx.Process(target=updater.update_runner, args=(self.to_q, self.from_q))
+        for updater, rb_size in zip(updaters, rb_sizes_q):
+            proc: BaseProcess = ctx.Process(target=updater.update_runner, args=(self.to_q, self.from_q, rb_size))
             proc.daemon = True
             proc.start()
             self.procs.append(proc)
 
         return to_main_q, self.from_main_qs
 
-    def start_update(self, step_probs: List[int], num_gen: int, targ_update_num: Optional[int], train_batch_size: int,
+    def start_update(self, step_probs: List[int], num_gen: int, train_batch_size: int,
                      device: torch.device, on_gpu: bool) -> None:
         # start parallel nnet runners
-        self.set_targ_update_num(targ_update_num)
         self.start_nnet_runners(device, on_gpu)
 
         # put update data
         for proc_idx, from_main_q in enumerate(self.from_main_qs):
-            from_main_q.put((step_probs, targ_update_num))
+            from_main_q.put((step_probs, self.targ_update_nums.copy()))
 
         # put work information on to_q
         assert self.to_q is not None
@@ -289,47 +311,39 @@ class Update(Generic[D, P, Inst], ABC):
         self.to_q = None
         self.from_q = None
 
-    def initialize_fns(self, targ_update_num: Optional[int]) -> None:
+    def initialize_fns(self) -> None:
         for nnet_name in self.nnet_par_dict.keys():
             nnet: NNetPar = self.nnet_par_dict[nnet_name]
             nnet_par_info: NNetParInfo = self.nnet_par_info_dict[nnet_name]
+            targ_update_num: Optional[int] = self.targ_update_nums.get(nnet_name)
             self.nnet_fn_dict[nnet_name] = nnet.get_nnet_par_fn(nnet_par_info, targ_update_num)
         self.domain.set_nnet_fns(self.nnet_fn_dict)
-
-    def get_up_args_repr(self) -> str:
-        return self.up_args.__repr__()
 
     def get_pathfind(self) -> P:
         pathfind_kwargs: Dict[str, Any] = self.pathfind_kwargs.copy()
         pathfind_kwargs["domain"] = self.domain
+        pathfind_kwargs["functions"] = self._get_pathfind_functions()
         return cast(P, pathfinding_factory.build_class(self.pathfind_name, pathfind_kwargs))
 
-    @abstractmethod
-    def _set_pathfind_nnet_fns(self, pathfind: P) -> None:
-        pass
+    def set_targ_update_num(self, nnet_name: str, targ_update_num: int) -> None:
+        self.targ_update_nums[nnet_name] = targ_update_num
 
-    @abstractmethod
-    def _step(self, pathfind: P, times: Times) -> List[NDArray]:
-        pass
+    def update_runner(self, to_q: Queue, from_q: Queue, rb_size: int) -> None:
+        if self.up_args.sync_main:
+            assert rb_size > 0, "must use a replay buffer if doing sync_main"
+        self._init_replay_buffer(rb_size)
 
-    @abstractmethod
-    def _get_instance_data(self, instances: List[Inst], times: Times) -> List[NDArray]:
-        pass
-
-    def set_targ_update_num(self, targ_update_num: Optional[int]) -> None:
-        self.targ_update_num = targ_update_num
-
-    def update_runner(self, to_q: Queue, from_q: Queue) -> None:
         while True:
             assert self.from_main_q is not None
-            data_q: Optional[Tuple[List[int], Optional[int]]] = self.from_main_q.get()
+            data_q: Optional[Tuple[List[int], Dict[str, int]]] = self.from_main_q.get()
             if data_q is None:
                 break
             times: Times = Times()
 
-            step_probs, targ_update_num = data_q
-            self.set_targ_update_num(targ_update_num)
-            self.initialize_fns(targ_update_num)
+            step_probs, targ_update_nums = data_q
+            for nnet_name, targ_update_num in targ_update_nums.items():
+                self.set_targ_update_num(nnet_name, targ_update_num)
+            self.initialize_fns()
 
             step_to_pathperf: Dict[int, PathFindPerf] = dict()
             while True:
@@ -338,9 +352,8 @@ class Update(Generic[D, P, Inst], ABC):
                     break
 
                 pathfind: P = self.get_pathfind()
-                self._set_pathfind_nnet_fns(pathfind)
+                # self._set_pathfind_nnet_fns(pathfind)
 
-                # insts_rem_all: List[I] = []
                 insts_rem_last_itr: List[Inst] = []
                 put_from_q: List[List[NDArray]] = []
                 for _ in range(self.up_args.search_itrs):
@@ -349,41 +362,35 @@ class Update(Generic[D, P, Inst], ABC):
                     assert len(pathfind.instances) == batch_size, f"Values were {len(pathfind.instances)} and {batch_size}"
 
                     # step
-                    data: List[NDArray] = self._step(pathfind, times)
+                    if self.up_args.sync_main:
+                        data: List[NDArray] = self._step_sync_main(pathfind, times)
+                        _put_from_q([data], from_q, times)
+                    else:
+                        self._step(pathfind, times)
 
                     # remove instances
                     insts_rem_last_itr = pathfind.remove_finished_instances(self.up_args.search_itrs)
-
-                    # put
-                    if self.up_args.sync_main:
-                        _put_from_q([data], from_q, times)
-                    else:
-                        if len(insts_rem_last_itr) > 0:
-                            put_from_q.append(self._get_instance_data(insts_rem_last_itr, times))
+                    if len(insts_rem_last_itr) > 0:
+                        put_from_q.append(self._get_instance_data(insts_rem_last_itr, rb_size, times))
 
                     # performance
                     start_time = time.time()
                     self._update_perf(insts_rem_last_itr, step_to_pathperf)
                     times.record_time("update_perf", time.time() - start_time)
 
-                    # insts_rem_all.extend(insts_rem_last_itr)
-
                 if not self.up_args.sync_main:
                     if len(pathfind.instances) > 0:
-                        put_from_q.append(self._get_instance_data(pathfind.instances, times))
+                        put_from_q.append(self._get_instance_data(pathfind.instances, rb_size, times))
                     _put_from_q(put_from_q, from_q, times)
 
-                # pathfinding performance
-                # start_time = time.time()
-                # self._update_perf(insts_rem_all, step_to_pathperf)
-                # times.record_time("update_perf", time.time() - start_time)
-
                 times.add_times(pathfind.times, path=["pathfinding"])
+
                 start_time = time.time()
                 del insts_rem_last_itr
                 del put_from_q
                 del pathfind
                 gc.collect()
+                times.record_time("gc", time.time() - start_time)
 
             from_q.put((times, step_to_pathperf))
             self.clear_nnet_fn_dict()
@@ -400,8 +407,7 @@ class Update(Generic[D, P, Inst], ABC):
             if len(insts_rem) > 0:
                 steps_gen = [int(inst.inst_info[0]) for inst in insts_rem]
             else:
-                steps_gen = np.random.choice(self.up_args.step_max + 1, size=batch_size,
-                                             p=np.array(step_probs)).tolist()
+                steps_gen = np.random.choice(self.up_args.step_max + 1, size=batch_size, p=np.array(step_probs)).tolist()
             times.record_time("steps_gen", time.time() - start_time)
 
             # get instance information and kwargs
@@ -417,15 +423,108 @@ class Update(Generic[D, P, Inst], ABC):
             times.record_time("inst_add", time.time() - start_time)
 
     @abstractmethod
+    def _step(self, pathfind: P, times: Times) -> None:
+        pass
+
+    @abstractmethod
+    def _step_sync_main(self, pathfind: P, times: Times) -> List[NDArray]:
+        pass
+
+    @abstractmethod
+    def _get_pathfind_functions(self) -> FNs:
+        pass
+
+    def _get_instance_data(self, instances: List[Inst], rb_size: int, times: Times) -> List[NDArray]:
+        if rb_size == 0:
+            return self._get_instance_data_norb(instances, times)
+        else:
+            return self._get_instance_data_rb(instances, times)
+
+    @abstractmethod
+    def _get_instance_data_norb(self, instances: List[Inst], times: Times) -> List[NDArray]:
+        pass
+
+    @abstractmethod
+    def _get_instance_data_rb(self, instances: List[Inst], times: Times) -> List[NDArray]:
+        pass
+
+    @abstractmethod
     def _make_instances(self, pathfind: P, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
         pass
+
+    @abstractmethod
+    def _init_replay_buffer(self, max_size: int) -> None:
+        pass
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.up_args.__repr__()})"
+
+
+class UpdateHER(Update[GoalSampleableFromState, FNs, P, Inst], ABC):
+    def _step_sync_main(self, pathfind: P, times: Times) -> List[NDArray]:
+        raise NotImplementedError("Cannot train with sync_main if also doing hindsight experience replay (HER) since goal relabeling is done after search is "
+                                  "complete.")
+
+    def _get_instance_data_norb(self, instances: List[Inst], times: Times) -> List[NDArray]:
+        raise NotImplementedError("Must use replay buffer if doing HER.")
+
+    def _get_her_goals(self, instances: List[Inst], times: Times) -> Tuple[List[Inst], List[Goal]]:
+        """ If instance is not finisheed and solved, get deepest states out all nodes that have children + root node for relabeled goal.
+            :return: Instances and their corresponding goals (order of instances changes)
+        """
+        # get states/goals or mark for goal relabelling
+        instances_goalkeep: List[Inst] = []
+        instances_relabel: List[Inst] = []
+
+        rand_keeps: List[float] = cast(List[float], np.random.uniform(0, 1, size=len(instances)).tolist())
+        for instance, rand_keep in zip(instances, rand_keeps):
+            if instance.finished() and instance.has_soln():
+                instances_goalkeep.append(instance)
+            else:
+                instances_relabel.append(instance)
+
+        # get goals goalkeep
+        goals_goalkeep: List[Goal] = [instance.root_node.goal for instance in instances_goalkeep]
+
+        # get relabeled goals
+        goals_relabel: List[Goal] = []
+        if len(instances_relabel) > 0:
+            # get start states and deepest states
+            start_time = time.time()
+            states_start: List[State] = []
+            states_deepest: List[State] = []
+            for instance in instances_relabel:
+                states_start.append(instance.root_node.state)
+
+                # get all descendants that have children
+                nodes_desc: List[Node] = instance.root_node.get_all_descendants()
+                node_desc_w_children: List[Node] = [node_desc for node_desc in nodes_desc if len(node_desc.edge_dict) > 0]
+
+                # get state of deepest node
+                state_deepest: State = instance.root_node.state
+                deepest_depth: int = 0
+                for node in node_desc_w_children:
+                    depth: int = len(get_path(node)[0])
+                    if depth > deepest_depth:
+                        deepest_depth = depth
+                        state_deepest = node.state
+                states_deepest.append(state_deepest)
+
+            times.record_time("her_node_deepest", time.time() - start_time)
+
+            # relabel
+            start_time = time.time()
+            goals_relabel = self.domain.sample_goal_from_state(states_start, states_deepest)
+            times.record_time("her_relabel", time.time() - start_time)
+
+        return instances_goalkeep + instances_relabel, goals_goalkeep + goals_relabel
 
 
 HNet = TypeVar('HNet', bound=HeurNNetPar)
 H = TypeVar('H', bound=HeurFn)
 
 
-class UpdateHasHeur(Update[D, P, Inst], Generic[D, P, Inst, HNet, H], ABC):
+class UpdateHasHeur(Update[D, FNsH, P, Inst], Generic[D, FNsH, P, Inst, HNet, H], ABC):
     @staticmethod
     def heur_name() -> str:
         return 'heur'
@@ -440,25 +539,108 @@ class UpdateHasHeur(Update[D, P, Inst], Generic[D, P, Inst, HNet, H], ABC):
         return cast(HNet, self.nnet_par_dict[self.heur_name()])
 
     def get_heur_fn(self) -> H:
-        if not self.up_args.sync_main:
-            return self._get_heur_fn_from_dict()
-        else:
-            assert self.nnet_par_info_main is not None
-            return cast(H, self.get_heur_nnet_par().get_nnet_par_fn(self.nnet_par_info_main, None))
+        return self._get_heur_fn_from_dict()
 
     def _get_heur_fn_from_dict(self) -> H:
         return cast(H, self.nnet_fn_dict[self.heur_name()])
 
 
-class UpdateHeur(UpdateHasHeur[D, P, Inst, HNet, H]):
+class UpdateHasPolicy(Update[D, FNsP, P, Inst], ABC):
+    @staticmethod
+    def policy_name() -> str:
+        return 'policy'
+
+    def set_policy_nnet(self, policy_nnet: PolicyNNetPar) -> None:
+        self.add_nnet_par(self.policy_name(), policy_nnet)
+
+    def set_policy_file(self, policy_file: str) -> None:
+        self.set_nnet_file(self.policy_name(), policy_file)
+
+    def get_policy_nnet_par(self) -> PolicyNNetPar:
+        return cast(PolicyNNetPar, self.nnet_par_dict[self.policy_name()])
+
+    def get_policy_fn(self) -> PolicyFn:
+        return self._get_policy_fn_from_dict()
+
+    def _get_policy_fn_from_dict(self) -> PolicyFn:
+        return cast(PolicyFn, self.nnet_fn_dict[self.policy_name()])
+
+
+PS = TypeVar('PS', bound=PathFindSup)
+
+
+class UpdateSup(Update[D, Any, PS, Inst], ABC):
+    @staticmethod
+    def functions_type() -> Type[Any]:
+        return Any
+
+    def _step(self, pathfind: PS, times: Times) -> None:
+        pathfind.step()
+
+    def _get_pathfind_functions(self) -> Any:
+        return None
+
+    def _make_instances(self, pathfind: PS, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
+        return pathfind.make_instances_rw(steps_gen, inst_infos)
+
+    def _step_sync_main(self, pathfind: PS, times: Times) -> List[NDArray]:
+        raise NotImplementedError("No sync_main option for supervised update")
+
+    def _get_instance_data_rb(self, instances: List[Inst], times: Times) -> List[NDArray]:
+        raise NotImplementedError("No replay buffer used with supervised update")
+
+    def _init_replay_buffer(self, max_size: int) -> None:
+        pass
+
+
+class UpdateRL(Update[D, FNs, P, Inst], ABC):
+    def _make_instances(self, pathfind: P, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
+        # get states/goals
+        times_states: Times = Times()
+        states_gen, goals_gen = self.domain.sample_problem_instances(steps_gen, times=times_states)
+        times.add_times(times_states, ["get_states"])
+
+        return pathfind.make_instances(states_gen, goals_gen, inst_infos=inst_infos, compute_root_vals=False)
+
+
+class UpdateHeur(UpdateHasHeur[D, FNsH, P, Inst, HNet, H]):
     @abstractmethod
     def get_heur_train_shapes_dtypes(self) -> List[Tuple[Tuple[int, ...], np.dtype]]:
         pass
 
+    def get_heur_fn(self) -> H:
+        if not self.up_args.sync_main:
+            return super().get_heur_fn()
+        else:
+            assert self.nnet_par_info_main is not None
+            return cast(H, self.get_heur_nnet_par().get_nnet_par_fn(self.nnet_par_info_main, None))
 
-class UpdateHeurV(UpdateHeur[D, P, InstanceV, HeurNNetParV, HeurFnV], ABC):
+    def _get_targ_heur_fn(self) -> H:
+        return self._get_heur_fn_from_dict()
+
+
+class UpdatePolicy(UpdateHasPolicy[D, FNsP, P, Inst], ABC):
+    def get_policy_train_shapes_dtypes(self) -> List[Tuple[Tuple[int, ...], np.dtype]]:
+        states, goals = self.domain.sample_problem_instances([0])
+        actions: List[Action] = self.domain.sample_state_action(states)
+        inputs_nnet: List[NDArray[Any]] = self.get_policy_nnet_par().to_np_train(states, goals, actions)
+
+        shapes_dtypes: List[Tuple[Tuple[int, ...], np.dtype]] = []
+        for inputs_nnet_i in inputs_nnet:
+            shapes_dtypes.append((inputs_nnet_i[0].shape, inputs_nnet_i.dtype))
+
+        return shapes_dtypes
+
+    def get_policy_fn(self) -> PolicyFn:
+        if not self.up_args.sync_main:
+            return super().get_policy_fn()
+        else:
+            raise NotImplementedError("sync_main not yet implemented for policy_fn")
+
+
+class UpdateHeurV(UpdateHeur[D, FNsHV, P, InstanceNode, HeurNNetParV, HeurFnV], ABC):
     def get_heur_train_shapes_dtypes(self) -> List[Tuple[Tuple[int, ...], np.dtype]]:
-        states, goals = self.domain.sample_start_goal_pairs([0])
+        states, goals = self.domain.sample_problem_instances([0])
         inputs_nnet: List[NDArray[Any]] = self.get_heur_nnet_par().to_np(states, goals)
 
         shapes_dtypes: List[Tuple[Tuple[int, ...], np.dtype]] = []
@@ -469,9 +651,9 @@ class UpdateHeurV(UpdateHeur[D, P, InstanceV, HeurNNetParV, HeurFnV], ABC):
         return shapes_dtypes
 
 
-class UpdateHeurQ(UpdateHeur[D, P, InstanceQ, HeurNNetParQ, HeurFnQ], ABC):
+class UpdateHeurQ(UpdateHeur[D, FNsHQ, P, InstanceEdge, HeurNNetParQ, HeurFnQ], ABC):
     def get_heur_train_shapes_dtypes(self) -> List[Tuple[Tuple[int, ...], np.dtype]]:
-        states, goals = self.domain.sample_start_goal_pairs([0])
+        states, goals = self.domain.sample_problem_instances([0])
         actions: List[Action] = self.domain.sample_state_action(states)
         inputs_nnet: List[NDArray[Any]] = self.get_heur_nnet_par().to_np(states, goals, [[action] for action in actions])
 
@@ -481,36 +663,3 @@ class UpdateHeurQ(UpdateHeur[D, P, InstanceQ, HeurNNetParQ, HeurFnQ], ABC):
         shapes_dtypes.append((tuple(), np.dtype(np.float64)))
 
         return shapes_dtypes
-
-
-PH = TypeVar('PH', bound=PathFindHeur)
-
-
-class UpdateHeurRL(UpdateHeur[D, PH, Inst, HNet, H], ABC):
-    def __init__(self, domain: D, pathfind_name: str, pathfind_kwargs: Dict[str, Any], up_args: UpArgs):
-        super().__init__(domain, pathfind_name, pathfind_kwargs, up_args)
-
-    def _get_targ_heur_fn(self) -> H:
-        return self._get_heur_fn_from_dict()
-
-    def _set_pathfind_nnet_fns(self, pathfind: PH) -> None:
-        pathfind.set_heur_fn(self.get_heur_fn())
-
-    def _make_instances(self, pathfind: PH, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
-        # get states/goals
-        times_states: Times = Times()
-        states_gen, goals_gen = self.domain.sample_start_goal_pairs(steps_gen, times=times_states)
-        times.add_times(times_states, ["get_states"])
-
-        return pathfind.make_instances(states_gen, goals_gen, inst_infos=inst_infos, compute_root_heur=False)
-
-
-PS = TypeVar('PS', bound=PathFindSup)
-
-
-class UpdateHeurSup(UpdateHeur[D, PS, Inst, HNet, H], ABC):
-    def _set_pathfind_nnet_fns(self, pathfind: PathFindSup) -> None:
-        pass
-
-    def _make_instances(self, pathfind: PathFindSup, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
-        return pathfind.make_instances_rw(steps_gen, inst_infos)

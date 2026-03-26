@@ -4,7 +4,7 @@ from matplotlib.figure import Figure
 
 from deepxube.base.factory import Parser
 from deepxube.base.domain import State, Action, Goal, ActsEnumFixed, StartGoalWalkable, StateGoalVizable, StringToAct
-from deepxube.base.nnet_input import StateGoalIn, HasFlatSGActsEnumFixedIn
+from deepxube.base.nnet_input import StateGoalIn, HasFlatSGActsEnumFixedIn, HasFlatSGAIn, FlatInPolicy
 from deepxube.factories.domain_factory import domain_factory
 from deepxube.factories.nnet_input_factory import register_nnet_input
 from matplotlib.colors import ListedColormap
@@ -53,7 +53,7 @@ class GridAction(Action):
 @domain_factory.register_class("grid")
 class Grid(ActsEnumFixed[GridState, GridAction, GridGoal], StartGoalWalkable[GridState, GridAction, GridGoal],
            StateGoalVizable[GridState, GridAction, GridGoal], StringToAct[GridState, GridAction, GridGoal],
-           HasFlatSGActsEnumFixedIn[GridState, GridAction, GridGoal]):
+           HasFlatSGActsEnumFixedIn[GridState, GridAction, GridGoal], HasFlatSGAIn[GridState, GridAction, GridGoal]):
     def __init__(self, dim: int = 7):
         super().__init__()
         self.dim: int = dim
@@ -85,9 +85,15 @@ class Grid(ActsEnumFixed[GridState, GridAction, GridGoal], StartGoalWalkable[Gri
     def get_input_info_flat_sg(self) -> Tuple[List[int], List[int]]:
         return [4], [self.dim]
 
+    def get_input_info_flat_sga(self) -> Tuple[List[int], List[int]]:
+        return [4, 1], [self.dim, self.get_num_acts()]
+
     def to_np_flat_sg(self, states: List[GridState], goals: List[GridGoal]) -> List[NDArray]:
         return [np.stack([np.stack([state.robot_x for state in states]), np.stack([state.robot_y for state in states]),
                           np.stack([goal.robot_x for goal in goals]), np.stack([goal.robot_y for goal in goals])], axis=1)]
+
+    def to_np_flat_sga(self, states: List[GridState], goals: List[GridGoal], actions: List[GridAction]) -> List[NDArray]:
+        return self.to_np_flat_sg(states, goals) + [np.expand_dims(np.array(self.actions_to_indices(actions)), 1)]
 
     def actions_to_indices(self, actions: List[GridAction]) -> List[int]:
         return [action_i.action for action_i in actions]
@@ -137,3 +143,19 @@ class GridNNetInput(StateGoalIn[Grid, GridState, GridGoal]):
             np_rep[idx, 1, goal.robot_x, goal.robot_y] = 1
 
         return [np_rep]
+
+
+@register_nnet_input("grid", "grid_nnet_input_policy")
+class GridNNetInputPolicy(FlatInPolicy[Grid, GridState, GridGoal, GridAction]):
+    def get_input_info(self) -> Tuple[List[int], List[int]]:
+        return [4, 1], [self.domain.dim, 4]
+
+    def to_np(self, states: List[GridState], goals: List[GridGoal], actions: List[GridAction]) -> List[NDArray]:
+        return self.domain.to_np_flat_sg(states, goals) + [np.expand_dims(np.array(self.domain.actions_to_indices(actions)), 1)]
+
+    def to_np_fn(self, states: List[GridState], goals: List[GridGoal]) -> List[NDArray]:
+        return self.domain.to_np_flat_sg(states, goals)
+
+    def nnet_out_to_actions(self, nnet_out: NDArray[np.float64]) -> List[GridAction]:
+        actions_int: List[int] = np.argmax(nnet_out, axis=1).tolist()
+        return [GridAction(action) for action in actions_int]

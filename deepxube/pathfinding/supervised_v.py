@@ -1,12 +1,24 @@
 from abc import ABC
 from typing import List, Any, Optional, Type, TypeVar, Tuple
-from deepxube.base.domain import Domain, State, Goal, StartGoalWalkable, GoalStartRevWalkableActsRev, Action
-from deepxube.base.pathfinding import InstanceV, Node, PathFindV, PathFindSup
+from deepxube.base.domain import Domain, State, Goal, StartGoalWalkable, GoalStartRevWalkable
+from deepxube.base.pathfinding import InstanceNode, Node, EdgeQ, PathFindNode, PathFindSup
 from deepxube.factories.pathfinding_factory import pathfinding_factory
 import time
 
 
-class InstanceSupV(InstanceV):
+class InstanceNodeSup(InstanceNode):
+    def filter_expanded_nodes(self, nodes: List[Node]) -> List[Node]:
+        raise NotImplementedError
+
+    def frontier_size(self) -> int:
+        raise NotImplementedError
+
+    def record_goal(self, nodes: List[Node]) -> None:
+        raise NotImplementedError
+
+    def push_pop_nodes(self, nodes: List[Node], costs: List[float]) -> List[Node]:
+        raise NotImplementedError
+
     def __init__(self, root_node: Node, path_cost_sup: float, inst_info: Any):
         super().__init__(root_node, inst_info)
         self.path_cost_sup: float = path_cost_sup
@@ -18,50 +30,47 @@ class InstanceSupV(InstanceV):
 D = TypeVar('D', bound=Domain)
 
 
-class PathFindVSup(PathFindV[D, InstanceSupV], PathFindSup[D, InstanceSupV], ABC):
-    def step(self, verbose: bool = False) -> List[Node]:
+class PathFindNodeSup(PathFindNode[D, Any, InstanceNodeSup], PathFindSup[D, InstanceNodeSup], ABC):
+    def step(self, verbose: bool = False) -> Tuple[List[Node], List[EdgeQ]]:
         nodes: List[Node] = []
         for instance in self.instances:
             node_root: Node = instance.root_node
             node_root.heuristic = instance.path_cost_sup
             node_root.backup_val = instance.path_cost_sup
             nodes.append(node_root)
-            instance.nodes_popped.append(node_root)
+            instance.add_nodes_popped([node_root])
             instance.itr += 1
         start_time = time.time()
         self.set_is_solved(nodes)
         self.times.record_time("is_solved", time.time() - start_time)
 
-        return nodes
+        return nodes, []
 
-    def _expand(self, states: List[State], goals: List[Goal]) -> Tuple[List[List[State]], List[List[Action]], List[List[float]]]:
+    def _compute_costs(self, instances: List[InstanceNodeSup], nodes_by_inst: List[List[Node]]) -> List[List[float]]:
         raise NotImplementedError
 
-    def _get_heur_vals(self, states: List[State], goals: List[Goal]) -> List[float]:
-        raise NotImplementedError
-
-    def _make_instances(self, states_start: List[State], goals: List[Goal], path_costs: List[float], inst_infos: Optional[List[Any]]) -> List[InstanceSupV]:
-        nodes_root: List[Node] = self._create_root_nodes(states_start, goals, compute_root_heur=False)
+    def _make_instances(self, states_start: List[State], goals: List[Goal], path_costs: List[float], inst_infos: Optional[List[Any]]) -> List[InstanceNodeSup]:
+        nodes_root: List[Node] = self._create_root_nodes(states_start, goals, False)
 
         start_time = time.time()
         if inst_infos is None:
             inst_infos = [None for _ in states_start]
 
-        instances: List[InstanceSupV] = []
+        instances: List[InstanceNodeSup] = []
         for node_root, path_cost, inst_info in zip(nodes_root, path_costs, inst_infos):
-            instances.append(InstanceSupV(node_root, path_cost, inst_info))
+            instances.append(InstanceNodeSup(node_root, path_cost, inst_info))
         self.times.record_time("instances", time.time() - start_time)
 
         return instances
 
 
 @pathfinding_factory.register_class("sup_v_rw")
-class PathFindVSupRW(PathFindVSup[StartGoalWalkable]):
+class PathFindNodeSupRW(PathFindNodeSup[StartGoalWalkable]):
     @staticmethod
     def domain_type() -> Type[StartGoalWalkable]:
         return StartGoalWalkable
 
-    def make_instances_rw(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceSupV]:
+    def make_instances_rw(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceNodeSup]:
         start_time = time.time()
         states_start: List[State] = self.domain.sample_start_states(len(steps_gen))
         self.times.record_time("get_start_states", time.time() - start_time)
@@ -79,14 +88,14 @@ class PathFindVSupRW(PathFindVSup[StartGoalWalkable]):
 
 
 @pathfinding_factory.register_class("sup_v_rw_rev")
-class PathFindVSupRWRev(PathFindVSup[GoalStartRevWalkableActsRev]):
+class PathFindNodeSupRWRev(PathFindNodeSup[GoalStartRevWalkable]):
     @staticmethod
-    def domain_type() -> Type[GoalStartRevWalkableActsRev]:
-        return GoalStartRevWalkableActsRev
+    def domain_type() -> Type[GoalStartRevWalkable]:
+        return GoalStartRevWalkable
 
-    def make_instances_rw(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceSupV]:
+    def make_instances_rw(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceNodeSup]:
         start_time = time.time()
-        states_goal, goals = self.domain.sample_goal_state_goal_pairs(len(steps_gen))
+        states_goal, goals = self.domain.sample_goalstate_goal_pairs(len(steps_gen))
         self.times.record_time("samp_goal_state_goal", time.time() - start_time)
 
         start_time = time.time()

@@ -6,16 +6,15 @@ from deepxube._train_cli import parser_train
 from deepxube._solve import parse_solve
 from deepxube.base.factory import Parser
 from deepxube.base.domain import Domain, StateGoalVizable, StringToAct, State, Action, Goal
-from deepxube.base.heuristic import HeurNNet, HeurNNetPar
-from deepxube.base.pathfinding import PathFind, PathFindHeur
+from deepxube.base.heuristic import HeurNNet, HeurNNetPar, PolicyNNetPar
+from deepxube.base.pathfinding import PathFind
 from deepxube.factories.domain_factory import domain_factory
 from deepxube.factories.nnet_input_factory import get_domain_nnet_input_keys, get_nnet_input_t
 from deepxube.factories.heuristic_factory import heuristic_factory
 from deepxube.factories.pathfinding_factory import pathfinding_factory, get_domain_compat_pathfind_names
-from deepxube.pathfinding.utils.performance import PathFindPerf
-from deepxube.training.trainers import Status
+from deepxube.base.trainer import TrainSummary
 from deepxube.tests.time_tests import time_test
-from deepxube.utils.command_line_utils import get_domain_from_arg, get_heur_nnet_par_from_arg
+from deepxube.utils.command_line_utils import get_domain_from_arg, get_heur_nnet_par_from_arg, get_policy_nnet_par_from_arg
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
@@ -29,8 +28,8 @@ import os
 import time
 
 
-def plot_scatter(ax: Axes, x: Any, y: Any, x_label: str, y_label: str, xy_line: bool, title: str = "") -> None:
-    ax.scatter(x, y, s=10)
+def plot_scatter(ax: Axes, x: Any, y: Any, x_label: str, y_label: str, xy_line: bool, alpha: float = 1.0, title: str = "") -> None:
+    ax.scatter(x, y, s=10, alpha=alpha)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     if xy_line:
@@ -107,8 +106,7 @@ def pathfinding_info(args: argparse.Namespace) -> None:
         print(textwrap.indent(f"Mixins: {mixin_str}", '\t'))
 
         print(textwrap.indent(f"Domain type expected: {pathfind_t.domain_type()}", '\t'))
-        if issubclass(pathfind_t, PathFindHeur):
-            print(textwrap.indent(f"Heuristic type expected: {pathfind_t.heur_fn_type()}", '\t'))
+        print(textwrap.indent(f"Functions type expected: {pathfind_t.functions_type()}", '\t'))
 
         parser: Optional[Parser] = pathfinding_factory.get_parser(name)
         if parser is not None:
@@ -129,7 +127,7 @@ def viz(args: argparse.Namespace) -> None:
         state = data['states'][args.idx]
         goal = data['goals'][args.idx]
     else:
-        states, goals = domain.sample_start_goal_pairs([args.steps])
+        states, goals = domain.sample_problem_instances([args.steps])
         state = states[0]
         goal = goals[0]
 
@@ -155,13 +153,12 @@ def viz(args: argparse.Namespace) -> None:
                         print(f"Action: {action}")
                         state_next_l, tcs = domain.next_state([state], [action])
                         state_next: State = state_next_l[0]
-                        tc: float = tcs[0]
-                        print(f"Transition cost: {tc}")
+                        print(f"Transition cost: {tcs[0]}")
                         state_idx += 1
                         assert state_next == states_on_path[state_idx]
                         state = state_next
 
-                        _viz_state_goal_update(cast(StateGoalVizable, domain), state, goal, fig)
+                        _viz_state_goal_update(domain, state, goal, fig)
 
                         print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
                         if state_idx == state_idx_max:
@@ -170,14 +167,14 @@ def viz(args: argparse.Namespace) -> None:
                     if state_idx > 0:
                         state_idx -= 1
                         state = states_on_path[state_idx]
-                        _viz_state_goal_update(cast(StateGoalVizable, domain), state, goal, fig)
+                        _viz_state_goal_update(domain, state, goal, fig)
 
                         print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
                 else:
                     state_idx = int(act_str)
                     assert state_idx >= 0
                     state = states_on_path[state_idx]
-                    _viz_state_goal_update(cast(StateGoalVizable, domain), state, goal, fig)
+                    _viz_state_goal_update(domain, state, goal, fig)
                     print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
         else:
             input("Not solved (press enter to quit): ")
@@ -189,21 +186,20 @@ def viz(args: argparse.Namespace) -> None:
                 act_str = input("Write action (press enter to quit): ")
                 if len(act_str) == 0:
                     break
-                action: Optional[Action] = domain.string_to_action(act_str)
-                if action is None:
+                action_op: Optional[Action] = domain.string_to_action(act_str)
+                if action_op is None:
                     print(f"No action {act_str}")
                 else:
-                    states_next, tcs = domain.next_state([state], [action])
+                    states_next, tcs = domain.next_state([state], [action_op])
                     state = states_next[0]
-                    tc: float = tcs[0]
-                    print(f"Transition cost: {tc}")
+                    print(f"Transition cost: {tcs[0]}")
                     print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
                     _viz_state_goal_update(cast(StateGoalVizable, domain), state, goal, fig)
         else:
             plt.show(block=True)
 
 
-def _viz_state_goal_update(domain: StateGoalVizable, state: State, goal: Goal, fig: Figure):
+def _viz_state_goal_update(domain: StateGoalVizable, state: State, goal: Goal, fig: Figure) -> None:
     fig.clear()
     domain.visualize_state_goal(state, goal, fig)
     fig.canvas.draw()
@@ -212,34 +208,37 @@ def _viz_state_goal_update(domain: StateGoalVizable, state: State, goal: Goal, f
 def time_test_args(args: argparse.Namespace) -> None:
     domain, domain_name = get_domain_from_arg(args.domain)
     heur_nnet_par: Optional[HeurNNetPar] = None
+    policy_nnet_par: Optional[PolicyNNetPar] = None
     if args.heur is not None:
         heur_nnet_par = get_heur_nnet_par_from_arg(domain, domain_name, args.heur, args.heur_type)[0]
-    time_test(domain, heur_nnet_par, args.num_insts, args.step_max)
+    if args.policy is not None:
+        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp, args.policy_rand)[0]
+    time_test(domain, heur_nnet_par, policy_nnet_par, args.num_insts, args.step_max)
 
 
 def plot_itr_data(axs: List[Axes], step_slider: Slider, itr: int, itr_to_in_out: Dict[int, Tuple[NDArray, NDArray]],
-                  itr_to_steps_to_pathfindperf: Dict[int, Dict[int, PathFindPerf]]) -> None:
-    steps_to_pathfindperf: Dict[int, PathFindPerf] = itr_to_steps_to_pathfindperf[itr]
+                  itr_to_steps_to_pathfindstats: Dict[int, Dict[int, Dict]]) -> None:
+    steps_to_pathfindperf: Dict[int, Dict] = itr_to_steps_to_pathfindstats[itr]
     steps_at_itr: List[int] = sorted(steps_to_pathfindperf.keys())
-    per_solved: List[float] = [steps_to_pathfindperf[step].per_solved() for step in steps_at_itr]
-    path_costs: List[float] = [steps_to_pathfindperf[step].stats()[1] for step in steps_at_itr]
-    search_itrs: List[float] = [steps_to_pathfindperf[step].stats()[2] for step in steps_at_itr]
-    targets: List[float] = [float(np.mean(steps_to_pathfindperf[step].ctgs_bkup)) for step in steps_at_itr]
-    num_instances: List[int] = [len(steps_to_pathfindperf[step].ctgs_bkup) for step in steps_at_itr]
+    per_solved: List[float] = [steps_to_pathfindperf[step]["per_solved"] for step in steps_at_itr]
+    path_costs: List[float] = [steps_to_pathfindperf[step]["path_costs"] for step in steps_at_itr]
+    search_itrs: List[float] = [steps_to_pathfindperf[step]["search_itrs"] for step in steps_at_itr]
+    targets: List[float] = [np.mean(steps_to_pathfindperf[step]["ctgs_backup"]) for step in steps_at_itr]
+    num_instances: List[int] = [steps_to_pathfindperf[step]["num_instances"] for step in steps_at_itr]
     plot_scatter(axs[0], steps_at_itr, per_solved, "Step", "Percent Solved", False)
     plot_scatter(axs[1], steps_at_itr, path_costs, "Step", "Path Costs", False)
     plot_scatter(axs[2], steps_at_itr, search_itrs, "Step", "Search Iterations", False)
     plot_scatter(axs[3], steps_at_itr, targets, "Step", "Cost-to-Go Targets", False)
     plot_scatter(axs[4], steps_at_itr, num_instances, "Step", "# Instances", False)
-    plot_scatter(axs[5], itr_to_in_out[itr][0], itr_to_in_out[itr][1], "Target", "Prediction", True)
+    plot_scatter(axs[5], itr_to_in_out[itr][0], itr_to_in_out[itr][1], "Target", "Prediction", True, alpha=0.2)
     step_slider.valtext.set_text(f"Iteration {itr}")
 
 
 def train_summary(args: argparse.Namespace) -> None:
-    status_file: str = f"{args.dir}/status.pkl"
-    status: Status = pickle.load(open(status_file, "rb"))
-    itr_to_in_out: Dict[int, Tuple[NDArray, NDArray]] = status.itr_to_in_out
-    itr_to_steps_to_pathfindperf: Dict[int, Dict[int, PathFindPerf]] = status.itr_to_steps_to_pathfindperf
+    status_file: str = f"{args.dir}/{args.type}_train_summary.pkl"
+    train_summ: TrainSummary = pickle.load(open(status_file, "rb"))
+    itr_to_in_out: Dict[int, Tuple[NDArray, NDArray]] = train_summ.itr_to_in_out
+    itr_to_steps_to_pathfindperf: Dict[int, Dict[int, Dict]] = train_summ.itr_to_steps_to_pathfindstats
     itrs: List[int] = sorted(itr_to_in_out.keys())
     fig, axs_np = plt.subplots(3, 2)
     axs: List[Axes] = axs_np.flatten().tolist()
@@ -275,10 +274,10 @@ def problem_inst_gen(args: argparse.Namespace) -> None:
         return
 
     domain, _ = get_domain_from_arg(args.domain)
-    num_steps_l: List[int] = list(np.random.randint(args.step_max + 1, size=args.num))
+    num_steps_l: List[int] = list(np.random.randint(args.step_min, args.step_max + 1, size=args.num))
     print(f"Generating {args.num} states")
     start_time = time.time()
-    states, goals = domain.sample_start_goal_pairs(num_steps_l)
+    states, goals = domain.sample_problem_instances(num_steps_l)
     print(f"Time: {time.time() - start_time}")
 
     print(f"Saving data to {args.file}")
@@ -380,6 +379,9 @@ def _parse_time(parser: ArgumentParser) -> None:
     parser.add_argument('--domain', type=str, required=True, help="Domain name and arguments.")
     parser.add_argument('--heur', type=str, default=None, help="Heuristic name and arguments.")
     parser.add_argument('--heur_type', type=str, default="V", help="V, QFix, QIn.")
+    parser.add_argument('--policy', type=str, default=None, help="Policy name and arguments.")
+    parser.add_argument('--policy_samp', type=int, default=10, help="")
+    parser.add_argument('--policy_rand', type=int, default=5, help="")
     parser.add_argument('--num_insts', type=int, default=10, help="Number of problem instances to generate.")
     parser.add_argument('--step_max', type=int, default=10, help="Randomly generates problem instances with between 0 and step_max steps.")
     parser.set_defaults(func=time_test_args)
@@ -387,7 +389,8 @@ def _parse_time(parser: ArgumentParser) -> None:
 
 def _parse_problem_instance(parser: ArgumentParser) -> None:
     parser.add_argument('--domain', type=str, required=True, help="Domain name and arguments.")
-    parser.add_argument('--step_max', type=int, required=True, help="Randomly generates problem instances with between 0 and step_max steps.")
+    parser.add_argument('--step_min', type=int, default=0, help="Minimum number of steps to take")
+    parser.add_argument('--step_max', type=int, required=True, help="Maximum number of steps to take (inclusive)")
     parser.add_argument('--num', type=int, required=True, help="Number of problem instances to generate.")
     parser.add_argument('--file', type=str, required=True, help="File to which problem instances are stored.")
     parser.add_argument('--redo', action='store_true', default=False, help="If true, generate problem instances even if file already exists.")
@@ -396,4 +399,5 @@ def _parse_problem_instance(parser: ArgumentParser) -> None:
 
 def _parse_train_summary(parser: ArgumentParser) -> None:
     parser.add_argument('--dir', type=str, required=True, help="Training directory.")
+    parser.add_argument('--type', type=str, default="heur", help="heur or policy")
     parser.set_defaults(func=train_summary)
