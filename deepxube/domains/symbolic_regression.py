@@ -126,7 +126,7 @@ class SymbolicRegression(
 
             if num_terms < 2:
                 state_actions.append(
-                    [SymbolicAction(t, a) for a in SymbolicActionEnum for t in [-1]]
+                    [SymbolicAction(-1, a) for a in SymbolicActionEnum]
                 )
             else:
                 term_idxs = [-1] + list(range(num_terms))
