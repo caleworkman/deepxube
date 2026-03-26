@@ -80,7 +80,7 @@ class SymbolicAction(Action):
         return NotImplemented
 
     def __repr__(self) -> str:
-        return f"Term Index: {self.term}, Action: {self.action}"
+        return f"(Term Index: {self.term}, Action: {self.action})"
 
 
 @domain_factory.register_class('symbolic_regression')
@@ -117,23 +117,16 @@ class SymbolicRegression(
     #     return [SymbolicAction(term=1, action=n) for n in range(0, len(SymbolicActionEnum))]
 
     def get_state_actions(self, states: list[SymbolicState]) -> list[list[SymbolicAction]]:
-        # TODO: This is causing some issue
         list_of_list_of_actions = []
 
         for state in states:
-            state_actions = []
             num_terms = len(state.expr.args)
 
             if num_terms < 2:
-                state_actions.append(
-                    [SymbolicAction(-1, a) for a in SymbolicActionEnum]
-                )
+                state_actions = [SymbolicAction(-1, a) for a in SymbolicActionEnum]
             else:
                 term_idxs = [-1] + list(range(num_terms))
-                state_actions.append(
-                    [SymbolicAction(t, a) for a in SymbolicActionEnum for t in term_idxs]
-                )
-            print(state_actions)
+                state_actions = [SymbolicAction(t, a) for a in SymbolicActionEnum for t in term_idxs]
 
             list_of_list_of_actions.append(state_actions)
 
