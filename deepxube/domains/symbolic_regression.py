@@ -233,8 +233,27 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
     def get_input_info(self) -> Any:
         pass
 
-    def to_np(self, states: List[S], goals: List[G]) -> List[NDArray]:
+    def to_np(self, states: List[SymbolicState], goals: List[SymbolicGoal]) -> List[NDArray]:
+        # Final input something like
+        # [
+        #   [
+        #       [token1_1, token1_2, ..., token_1n],    # fixed length, assume max expression length and mask (pad?) missing
+        #       [token2_1, token2_2, ..., token2_n],
+        #   ]
+        #   [x1, x2, ..., x_n],    # this can probably be one dim because all the points are the same
+        #   [
+        #       [y1_1, y2, ..., y_n],
+        #       [y2_1, y2, ..., y_n],
+        #   ],
+        #   [
+        #       [g1_1, g1_2, ..., g1_n],
+        #       [g2_1, g2_2, ..., g2_n]
+        #   ]
+        # ]
+
+        # there are multiple token's, y's, and g's because it expects examples which it can distribute across GPUs, etc
         pass
+
 
 # For NN, may need to implement a different structure than Grid/Cube
 # For example, our inputs here are flat. Maybe Transformer
