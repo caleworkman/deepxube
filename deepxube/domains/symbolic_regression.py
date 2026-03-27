@@ -239,7 +239,7 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
         #   [
         #       [token1_1, token1_2, ..., token_1n],    # fixed length, assume max expression length and mask (pad?) missing
         #       [token2_1, token2_2, ..., token2_n],
-        #   ]
+        #   ],
         #   [x1, x2, ..., x_n],    # this can probably be one dim because all the points are the same
         #   [
         #       [y1_1, y2, ..., y_n],
