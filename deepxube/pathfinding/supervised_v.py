@@ -63,6 +63,9 @@ class PathFindNodeSup(PathFindNode[D, Any, InstanceNodeSup], PathFindSup[D, Inst
 
         return instances
 
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
 
 @pathfinding_factory.register_class("sup_v_rw")
 class PathFindNodeSupRW(PathFindNodeSup[StartGoalWalkable]):

@@ -68,6 +68,9 @@ class PathFindEdgeSup(PathFindEdge[D, Any, InstanceEdgeSup], PathFindSup[D, Inst
 
         return instances
 
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
 
 @pathfinding_factory.register_class("sup_q_rw")
 class PathFindEdgeSupRW(PathFindEdgeSup[StartGoalWalkable]):
