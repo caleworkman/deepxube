@@ -7,7 +7,7 @@ from deepxube.domains.symbolic_regression import SymbolicAction, SymbolicActionE
 
 
 class TestSymbolicRegression(unittest.TestCase):
-    # python - m unittest tests.test_symbolic_regression.TestSymbolicRegression
+    # python -m unittest tests.test_symbolic_regression.TestSymbolicRegression
 
     def setUp(self):
         self.regr = SymbolicRegression(random_walk_length=5)
