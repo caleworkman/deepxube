@@ -23,8 +23,8 @@ def parser_train(parser: ArgumentParser) -> None:
                                                                     "QIn maps state/goal/action tuples to q_value (can be used in arbitrary action spaces).")
 
     parser.add_argument('--policy', type=str, default=None, help="Policy neural network and arguments.")
-    parser.add_argument('--policy_samp', type=int, default=10, help="")
-    parser.add_argument('--policy_rand', type=int, default=5, help="")
+    parser.add_argument('--policy_samp', type=int, default=10, help="Number to actions to sample from policy")
+    parser.add_argument('--policy_rand', type=int, default=5, help="Number of random actions to sample")
 
     parser.add_argument('--pathfind', type=str, required=True, help="Pathfinding algorithm and arguments. Batch size of any pathfinding algorithm should be 1 "
                                                                     "since updater assumes 1 instance is generated per iteration.")

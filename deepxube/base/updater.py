@@ -283,9 +283,9 @@ class Update(Generic[D, FNs, P, Inst], ABC):
                 step_to_pathperf[step_num_perf] = step_to_pathperf[step_num_perf].comb_perf(pathperf)
 
         # print
+        print(f"Times - {times_up.get_time_str()}")
         if self.up_args.v:
             print(f"Generated {format(self.num_generated, ',')} training instances")
-            print(f"Times - {times_up.get_time_str()}")
             print_pathfindperf(step_to_pathperf)
 
         # clean up clean up everybody do your share

@@ -150,6 +150,7 @@ def solve_cli(args: argparse.Namespace) -> None:
         if not args.debug:
             sys.stdout = data_utils.Logger(output_file, "w")
 
+    # TODO add arg start_idx
     start_idx = len(results["actions"])
     for state_idx in range(start_idx, len(states)):
         # get problem instance
