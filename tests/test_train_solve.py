@@ -57,7 +57,7 @@ def test_train_solve_heur(pathfind_tr_str: str, pathfind_solve_str: str, heur_ty
     updater: UpdateHeur = updater_ret
 
     # train args
-    train_args: TrainArgs = TrainArgs(50, 0.001, 0.9999993, 2000, bal, display=0)
+    train_args: TrainArgs = TrainArgs(50, 2000, bal, display=0)
 
     # train
     save_dir: str = "tests/dummy/"

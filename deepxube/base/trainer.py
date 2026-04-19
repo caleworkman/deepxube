@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar, List, Dict, Tuple, cast, Optional
+from typing import Generic, TypeVar, List, Dict, Tuple, cast, Optional, Union
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.optimizer import Optimizer
+from torch.nn import DataParallel
+from torch.optim import Optimizer
 
 from deepxube.base.heuristic import DeepXubeNNet
 from deepxube.base.updater import Update
@@ -31,8 +31,6 @@ import time
 class TrainArgs:
     """
     :param batch_size: Batch size
-    :param lr: Initial learning rate
-    :param lr_d: Learning rate decay for every iteration. Learning rate is decayed according to: lr * (lr_d ^ itr)
     :param max_itrs: Maximum number of iterations
     :param balance_steps: If true, steps are balanced based on solve percentage
     :param rb: amount of data generated from previous updates to keep in replay buffer. Total replay buffer size will
@@ -45,8 +43,6 @@ class TrainArgs:
     :param skip_policy: Skip training of policy
     """
     batch_size: int
-    lr: float
-    lr_d: float
     max_itrs: int
     balance_steps: bool
     rb: int = 1
@@ -158,6 +154,13 @@ NNet = TypeVar('NNet', bound=DeepXubeNNet)
 Up = TypeVar('Up', bound=Update)
 
 
+def update_optimizer(optimizer: Optimizer, nnet: Union[DataParallel, DeepXubeNNet], train_itr: int) -> None:
+    if isinstance(nnet, DataParallel):
+        nnet = nnet.module
+    assert isinstance(nnet, DeepXubeNNet)
+    nnet.update_optimizer(optimizer, train_itr)
+
+
 class Train(Generic[NNet, Up], ABC):
     @staticmethod
     @abstractmethod
@@ -204,6 +207,7 @@ class Train(Generic[NNet, Up], ABC):
             torch.save(self.nnet.state_dict(), self.nnet_file)
         if not os.path.isfile(self.nnet_targ_file):
             torch.save(self.nnet.state_dict(), self.nnet_targ_file)
+        self.optimizer: Optimizer = self.nnet.get_optimizer()
 
         self.nnet.to(self.device)
         if self.data_parallel():
@@ -216,7 +220,6 @@ class Train(Generic[NNet, Up], ABC):
         self.db: DataBuffer = DataBuffer(self.train_args.batch_size * self.updater.up_args.get_up_gen_itrs(), db_shapes, db_dtypes)
 
         # optimizer and criterion
-        self.optimizer: Optimizer = optim.Adam(self.nnet.parameters(), lr=self.train_args.lr)
         self.train_start_time = time.time()
 
     def update_step(self) -> None:

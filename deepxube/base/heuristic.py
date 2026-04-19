@@ -8,8 +8,12 @@ from deepxube.base.domain import Domain, State, Goal, Action
 from deepxube.base.nnet_input import NNetInput, PolicyNNetIn
 from deepxube.nnet.nnet_utils import NNetParInfo, nnet_batched, NNetPar, get_nnet_par_out
 from deepxube.utils import misc_utils
+
 import torch
 from torch import nn, Tensor
+import torch.optim as optim
+from torch.optim.optimizer import Optimizer
+
 import random
 
 
@@ -26,10 +30,20 @@ class DeepXubeNNet(nn.Module, Generic[In], ABC):
         super().__init__()
         assert isinstance(nnet_input, self.nnet_input_type()), f"NNetInput {nnet_input} must be an instance of {self.nnet_input_type()}."
         self.nnet_input: In = nnet_input
+        self.lr: float = 0.001
+        self.lr_d: float = 0.9999993
 
     @abstractmethod
     def forward(self, inputs: List[Tensor]) -> List[Tensor]:
         pass
+
+    def get_optimizer(self) -> Optimizer:
+        return optim.Adam(self.parameters(), lr=0.001)
+
+    def update_optimizer(self, optimizer: Optimizer, train_itr: int) -> None:
+        lr_itr: float = self.lr * (self.lr_d ** train_itr)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr_itr
 
 
 # neural networks
