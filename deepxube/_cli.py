@@ -213,7 +213,7 @@ def time_test_args(args: argparse.Namespace) -> None:
         heur_nnet_par = get_heur_nnet_par_from_arg(domain, domain_name, args.heur, args.heur_type)[0]
     if args.policy is not None:
         policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp, args.policy_rand)[0]
-    time_test(domain, heur_nnet_par, policy_nnet_par, args.num_insts, args.step_max)
+    time_test(domain, heur_nnet_par, policy_nnet_par, args.num_insts, args.step_min, args.step_max)
 
 
 def plot_itr_data(axs: List[Axes], step_slider: Slider, itr: int, itr_to_in_out: Dict[int, Tuple[NDArray, NDArray]],
@@ -383,7 +383,8 @@ def _parse_time(parser: ArgumentParser) -> None:
     parser.add_argument('--policy_samp', type=int, default=10, help="")
     parser.add_argument('--policy_rand', type=int, default=5, help="")
     parser.add_argument('--num_insts', type=int, default=10, help="Number of problem instances to generate.")
-    parser.add_argument('--step_max', type=int, default=10, help="Randomly generates problem instances with between 0 and step_max steps.")
+    parser.add_argument('--step_min', type=int, default=0, help="Min number of steps for problem instance generation.")
+    parser.add_argument('--step_max', type=int, default=10, help="Max number of steps for problem instance generation.")
     parser.set_defaults(func=time_test_args)
 
 

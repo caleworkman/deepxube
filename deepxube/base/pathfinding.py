@@ -384,6 +384,8 @@ class PathFindNode(PathFind[D, FNs, INode]):
 
         # is solved
         self.set_is_solved(nodes_popped_flat)
+        # for node in nodes_popped_flat:
+        #    print(node.state, node.is_solved)
 
         # record goal
         start_time = time.time()

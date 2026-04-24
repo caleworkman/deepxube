@@ -26,11 +26,11 @@ def data_runner(queue1: Queue, queue2: Queue) -> None:
         queue2.put(the)
 
 
-def test_env(env: Domain, num_states: int, step_max: int) -> Tuple[List[State], List[Goal], List[Action]]:
+def test_env(env: Domain, num_states: int, step_min: int, step_max: int) -> Tuple[List[State], List[Goal], List[Action]]:
     # get data
     start_time = time.time()
     sg_times: Times = Times()
-    states, goals = env.sample_problem_instances(list(np.random.randint(step_max + 1, size=num_states)), times=sg_times)
+    states, goals = env.sample_problem_instances(list(np.random.randint(step_min, step_max + 1, size=num_states)), times=sg_times)
     assert len(states) == len(goals), f"state({len(states)}) and goal({len(goals)}) pairs not same length"
 
     elapsed_time = time.time() - start_time
@@ -222,8 +222,9 @@ def test_policy_nnet_par(domain: Domain, policy_nnet_par: PolicyNNetPar, states:
     print("Computed policy for %i states in %s seconds (%.2f/second)" % (len(states), nnet_time, states_per_sec))
 
 
-def time_test(domain: Domain, heur_nnet_par: Optional[HeurNNetPar], policy_nnet_par: Optional[PolicyNNetPar], num_states: int, step_max: int) -> None:
-    states, goals, actions = test_env(domain, num_states, step_max)
+def time_test(domain: Domain, heur_nnet_par: Optional[HeurNNetPar], policy_nnet_par: Optional[PolicyNNetPar], num_states: int, step_min: int,
+              step_max: int) -> None:
+    states, goals, actions = test_env(domain, num_states, step_min, step_max)
     if isinstance(domain, StartGoalWalkable):
         test_envstartgoalrw(domain, num_states)
     if isinstance(domain, ActsEnum):

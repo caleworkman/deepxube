@@ -100,10 +100,22 @@ class LinearAct(nn.Module):
         return x
 
 
+class ReLU2(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dummy = 1
+
+    def forward(self, x: Tensor) -> Tensor:
+        self.dummy = 1  # so PyCharm does not complain
+        return nn.functional.relu(x).square()
+
+
 def get_act_fn(act: str) -> nn.Module:
     act = act.upper()
     if act == "RELU":
         return nn.ReLU()
+    if act == "RELU2":
+        return ReLU2()
     elif act == "ELU":
         return nn.ELU()
     elif act == "SIGMOID":
