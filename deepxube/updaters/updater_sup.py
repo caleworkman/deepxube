@@ -7,8 +7,7 @@ from deepxube.base.pathfinding import Node, EdgeQ, InstanceEdge, InstanceNode
 from deepxube.base.updater import UpdatePolicy, UpdateHeurV, UpdateHeurQ, UpdateSup
 from deepxube.factories.updater_factory import updater_factory
 from deepxube.utils.timing_utils import Times
-from deepxube.pathfinding.supervised_v import PathFindNodeSup
-from deepxube.pathfinding.supervised_q import PathFindEdgeSup
+from deepxube.pathfinding.supervised import PathFindNodeSup, PathFindEdgeSup
 
 import numpy as np
 

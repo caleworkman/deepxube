@@ -767,11 +767,14 @@ class PathFindSup(PathFind[D, Any, I]):
         raise NotImplementedError
 
     @abstractmethod
-    def make_instances_rw(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[I]:
-        """ Make instances from a random walk
+    def make_instances_sup(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[I]:
+        """ Make nodes/edges with labels
 
         """
         pass
 
     def _set_node_vals(self, nodes: List[Node]) -> None:
         raise NotImplementedError
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"

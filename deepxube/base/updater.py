@@ -581,7 +581,7 @@ class UpdateSup(Update[D, Any, PS, Inst], ABC):
         return None
 
     def _make_instances(self, pathfind: PS, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
-        return pathfind.make_instances_rw(steps_gen, inst_infos)
+        return pathfind.make_instances_sup(steps_gen, inst_infos)
 
     def _step_sync_main(self, pathfind: PS, times: Times) -> List[NDArray]:
         raise NotImplementedError("No sync_main option for supervised update")

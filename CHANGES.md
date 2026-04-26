@@ -4,6 +4,12 @@
 * Optimizer creation and update during training now part of DeepXubeNNet class. Methods can be overridden for different behavior.
 * step_min argument added to deepxube time
 * Added ReLU2 activation function
+* Fix start_idx usage in solve
+* sample_next_state returns action taken
+* Return actions taken for random_walk
+* ActsRev implements method to sample reverse states, actions that return from reverse states, and transition costs along edges from resulting reverse states
+* Make generating supervised labels for nodes/edges a Domain mixin
+* Consolidate supervised pathfinding classes into one file.
 
 ## 0.2.1
 * Consolidate search: Beam search -> special cases: greedy_policy, graph search -> special cases: batch weighted A* search, batch weighted Q* search 

@@ -45,7 +45,7 @@ class TrainArgs:
     batch_size: int
     max_itrs: int
     balance_steps: bool
-    rb: int = 1
+    rb: int = 0
     loss_thresh: float = np.inf
     targ_up_searches: int = 0
     skip_heur: bool = False
