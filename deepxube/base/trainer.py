@@ -76,9 +76,7 @@ class DataBuffer:
         assert len(self.arrays) > 0, "Data buffer should have at least one array."
         self._add_circular(arrays_add)
 
-    def sample(self, num: int) -> List[NDArray]:
-        sel_idxs: NDArray = np.random.randint(self.size(), size=num)
-
+    def sample(self, sel_idxs: NDArray) -> List[NDArray]:
         arrays_samp: List[NDArray] = sel_l(self.arrays, sel_idxs)
 
         return arrays_samp
@@ -287,16 +285,27 @@ class Train(Generic[NNet, Up], ABC):
     def _train(self, times: Times) -> float:
         loss: float = np.inf
         first_itr_in_update: bool = True
+        sel_idx_start: int = 0
+        sel_idxs_rand_order: NDArray = np.random.choice(self.db.size(), size=self.db.size(), replace=False)
         for _ in range(self.updater.up_args.up_itrs):
             # sample data
             start_time = time.time()
-            batch: List[NDArray] = self.db.sample(self.train_args.batch_size)
+            sel_idxs: NDArray = np.arange(sel_idx_start, sel_idx_start + self.train_args.batch_size) % self.db.size()
+
+            batch: List[NDArray] = self.db.sample(sel_idxs_rand_order[sel_idxs])
             times.record_time("data_samp", time.time() - start_time)
 
             # train
             loss = self._train_itr(batch, first_itr_in_update, times)
             first_itr_in_update = False
             self.status.itr += 1
+
+            # update sel_idx
+            if sel_idxs.max() == (self.db.size() - 1):
+                sel_idx_start = 0
+                sel_idxs_rand_order = np.random.choice(self.db.size(), size=self.db.size(), replace=False)
+            else:
+                sel_idx_start = int(sel_idxs[-1]) + 1
 
         return loss
 
@@ -305,15 +314,16 @@ class Train(Generic[NNet, Up], ABC):
         update_train_itr: int = 0
         first_itr_in_update: bool = True
         while update_train_itr < self.updater.up_args.up_itrs:
-            batch: List[NDArray]
             # data from updater should not be more that train_args.batch_size
             start_time = time.time()
+            sel_idxs: NDArray
             if self.db.size() == num_gen:
-                batch = self.db.sample(self.train_args.batch_size)
+                sel_idxs = np.random.randint(self.db.size(), size=self.train_args.batch_size)
             else:
+                # compute heuristic values for ongoing search and get data
                 self.nnet.eval()
                 while self.db.size() < ((update_train_itr + 1) * self.train_args.batch_size):
-                    # get heuristic values for ongoing search
+                    # compute heuristic values
                     q_res: Optional[Tuple[int, List[SharedNDArray]]] = get_nowait_noerr(self.to_main_q)
                     if q_res is not None:
                         proc_id, inputs_np_shm = q_res
@@ -324,9 +334,11 @@ class Train(Generic[NNet, Up], ABC):
                     data_l_i: List[List[NDArray]] = self.updater.get_update_data(nowait=True)
                     for data in data_l_i:
                         self.db.add(data)
-                sel_idxs: NDArray = np.arange(update_train_itr * self.train_args.batch_size,
-                                              (update_train_itr + 1) * self.train_args.batch_size)
-                batch = sel_l(self.db.arrays, sel_idxs)
+
+                # select incides
+                sel_idxs = np.arange(update_train_itr * self.train_args.batch_size, (update_train_itr + 1) * self.train_args.batch_size)
+
+            batch: List[NDArray] = self.db.sample(sel_idxs)
 
             times.record_time("up_data", time.time() - start_time)
 

@@ -10,6 +10,7 @@
 * ActsRev implements method to sample reverse states, actions that return from reverse states, and transition costs along edges from resulting reverse states
 * Make generating supervised labels for nodes/edges a Domain mixin
 * Consolidate supervised pathfinding classes into one file.
+* Sample from data buffer without replacement until all states seen
 
 ## 0.2.1
 * Consolidate search: Beam search -> special cases: greedy_policy, graph search -> special cases: batch weighted A* search, batch weighted Q* search 
