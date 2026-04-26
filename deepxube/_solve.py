@@ -42,7 +42,7 @@ def parse_solve(parser: ArgumentParser) -> None:
     parser.add_argument('--time_limit', type=float, default=-1.0, help="A time limit for search. Default is -1, which means infinite.")
 
     parser.add_argument('--results', type=str, required=True, help="Directory to save results. Saves results after every instance.")
-    parser.add_argument('--start_idx', type=int, default=0, help="Index of instance at which to start. Useful for debugging.")
+    parser.add_argument('--start_idx', type=int, default=None, help="Index of instance at which to start. Useful for debugging.")
     parser.add_argument('--nnet_batch_size', type=int, default=None, help="Maximum number of inputs to give to any nnet at a time during search. "
                                                                           "Lower if running out of memory. None means no limit.")
 
@@ -150,8 +150,11 @@ def solve_cli(args: argparse.Namespace) -> None:
         if not args.debug:
             sys.stdout = data_utils.Logger(output_file, "w")
 
-    # TODO add arg start_idx
-    start_idx = len(results["actions"])
+    start_idx: int
+    if args.start_idx is not None:
+        start_idx = args.start_idx
+    else:
+        start_idx = len(results["actions"])
     for state_idx in range(start_idx, len(states)):
         # get problem instance
         state: State = states[state_idx]
