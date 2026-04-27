@@ -11,6 +11,7 @@
 * Make generating supervised labels for nodes/edges a Domain mixin
 * Consolidate supervised pathfinding classes into one file.
 * Sample from data buffer without replacement until all states seen
+* Fix up_gen_itrs being set to 100. Now defaults to up_itrs unless specifically set to a given value.
 
 ## 0.2.1
 * Consolidate search: Beam search -> special cases: greedy_policy, graph search -> special cases: batch weighted A* search, batch weighted Q* search 

@@ -302,6 +302,7 @@ class Train(Generic[NNet, Up], ABC):
 
             # update sel_idx
             if sel_idxs.max() == (self.db.size() - 1):
+                print("AHHH")
                 sel_idx_start = 0
                 sel_idxs_rand_order = np.random.choice(self.db.size(), size=self.db.size(), replace=False)
             else:
