@@ -56,9 +56,9 @@ class ResnetFCPolicy(PolicyVAE[FlatInPolicy]):
     def nnet_input_type() -> Type[FlatInPolicy]:
         return FlatInPolicy
 
-    def __init__(self, nnet_input: FlatInPolicy, kl_weight: float, enc_dim: int = 10, res_dim: int = 1000, num_blocks: int = 4, batch_norm: bool = False,
-                 weight_norm: bool = False, group_norm: int = -1, act_fn: str = "RELU"):
-        super().__init__(nnet_input, kl_weight)
+    def __init__(self, nnet_input: FlatInPolicy, num_samp: int, kl_weight: float, enc_dim: int = 10, res_dim: int = 1000, num_blocks: int = 4,
+                 batch_norm: bool = False, weight_norm: bool = False, group_norm: int = -1, act_fn: str = "RELU"):
+        super().__init__(nnet_input, num_samp, kl_weight)
         # one hots
         input_dims, one_hot_depths = self.nnet_input.get_input_info()
         input_dims_sg: List[int] = input_dims[:self.nnet_input.states_goals_actions_split_idx()]

@@ -212,7 +212,7 @@ def time_test_args(args: argparse.Namespace) -> None:
     if args.heur is not None:
         heur_nnet_par = get_heur_nnet_par_from_arg(domain, domain_name, args.heur, args.heur_type)[0]
     if args.policy is not None:
-        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp, args.policy_rand)[0]
+        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp)[0]
     time_test(domain, heur_nnet_par, policy_nnet_par, args.num_insts, args.step_min, args.step_max)
 
 
@@ -381,7 +381,6 @@ def _parse_time(parser: ArgumentParser) -> None:
     parser.add_argument('--heur_type', type=str, default="V", help="V, QFix, QIn.")
     parser.add_argument('--policy', type=str, default=None, help="Policy name and arguments.")
     parser.add_argument('--policy_samp', type=int, default=10, help="")
-    parser.add_argument('--policy_rand', type=int, default=5, help="")
     parser.add_argument('--num_insts', type=int, default=10, help="Number of problem instances to generate.")
     parser.add_argument('--step_min', type=int, default=0, help="Min number of steps for problem instance generation.")
     parser.add_argument('--step_max', type=int, default=10, help="Max number of steps for problem instance generation.")

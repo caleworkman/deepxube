@@ -655,7 +655,7 @@ class PathFindSetPolicy(PathFind[D, FNsP, I], ABC):
         start_time = time.time()
         states: List[State] = [node.state for node in nodes]
         goals: List[Goal] = [node.goal for node in nodes]
-        actions_l, probs_l = self.functions.policy_fn(self.domain, states, goals)
+        actions_l, probs_l = self.functions.policy_fn(states, goals)
 
         assert len(actions_l) == len(probs_l) == len(states) == len(goals), \
             f"{len(actions_l)}, {len(probs_l)}, {len(states)}, {len(goals)}"
@@ -722,7 +722,7 @@ class PathFindActsEnum(PathFind[DActsEnum, FNs, I], ABC):
 
 class PathFindActsPolicy(PathFind[D, FNsP, I], ABC):
     def expand_states(self, states: List[State], goals: List[Goal]) -> Tuple[List[List[State]], List[List[Action]], List[List[float]]]:
-        actions_l: List[List[Action]] = self.functions.policy_fn(self.domain, states, goals)[0]
+        actions_l: List[List[Action]] = self.functions.policy_fn(states, goals)[0]
 
         # repeat states according to actions
         actions_flat, split_idxs = misc_utils.flatten(actions_l)
@@ -743,7 +743,7 @@ class PathFindActsPolicy(PathFind[D, FNsP, I], ABC):
         return states_exp, actions_l, tcs_l
 
     def get_state_actions(self, states: List[State], goals: List[Goal]) -> List[List[Action]]:
-        return self.functions.policy_fn(self.domain, states, goals)[0]
+        return self.functions.policy_fn(states, goals)[0]
 
 
 # pathfinding supervised (for training)

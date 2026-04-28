@@ -24,7 +24,6 @@ def parser_train(parser: ArgumentParser) -> None:
 
     parser.add_argument('--policy', type=str, default=None, help="Policy neural network and arguments.")
     parser.add_argument('--policy_samp', type=int, default=10, help="Number to actions to sample from policy")
-    parser.add_argument('--policy_rand', type=int, default=5, help="Number of random actions to sample")
 
     parser.add_argument('--pathfind', type=str, required=True, help="Pathfinding algorithm and arguments. Batch size of any pathfinding algorithm should be 1 "
                                                                     "since updater assumes 1 instance is generated per iteration.")
@@ -105,7 +104,7 @@ def train_cli(args: argparse.Namespace) -> None:
         assert isinstance(update_ret, UpdateHeur)
         update_heur = update_ret
     if args.policy is not None:
-        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp, args.policy_rand)[0]
+        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp)[0]
         update_ret = get_updater(domain, args.pathfind, up_args, args.her, "policy")
         assert isinstance(update_ret, UpdatePolicy)
         update_policy = update_ret

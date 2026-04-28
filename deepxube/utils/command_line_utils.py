@@ -35,11 +35,11 @@ def get_heur_nnet_par_from_arg(domain: Domain, domain_name: str, heur: str, heur
     return nnet_par, nnet_name
 
 
-def get_policy_nnet_par_from_arg(domain: Domain, domain_name: str, policy: str, num_samp: int, num_int: int) -> Tuple[PolicyNNetPar, str]:
+def get_policy_nnet_par_from_arg(domain: Domain, domain_name: str, policy: str, num_samp: int) -> Tuple[PolicyNNetPar, str]:
     nnet_name, nnet_args = get_name_args(policy)
     policy_factory.get_type(nnet_name)  # to ensure existence
     nnet_kwargs: Dict[str, Any] = policy_factory.get_kwargs(nnet_name, nnet_args)
-    nnet_par: PolicyNNetPar = build_policy_nnet_par(domain, domain_name, nnet_name, nnet_kwargs, num_samp, num_int)
+    nnet_par: PolicyNNetPar = build_policy_nnet_par(domain, domain_name, nnet_name, nnet_kwargs, num_samp)
     return nnet_par, nnet_name
 
 

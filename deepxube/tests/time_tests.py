@@ -176,7 +176,7 @@ def test_heur_nnet_par(heur_nnet_par: HeurNNetPar, states: List[State], goals: L
     print("Computed heuristic for %i states in %s seconds (%.2f/second)" % (len(states), nnet_time, states_per_sec))
 
 
-def test_policy_nnet_par(domain: Domain, policy_nnet_par: PolicyNNetPar, states: List[State], goals: List[Goal], actions: List[Action]) -> None:
+def test_policy_nnet_par(policy_nnet_par: PolicyNNetPar, states: List[State], goals: List[Goal], actions: List[Action]) -> None:
     # nnet format
     start_time = time.time()
     train_data_np: List[NDArray] = policy_nnet_par.to_np_train(states, goals, actions)
@@ -211,11 +211,11 @@ def test_policy_nnet_par(domain: Domain, policy_nnet_par: PolicyNNetPar, states:
 
     policy_fn: PolicyFn = policy_nnet_par.get_nnet_fn(nnet, None, device, None)
 
-    policy_fn(domain, states, goals)
+    policy_fn(states, goals)
 
     # nnet heuristic
     start_time = time.time()
-    policy_fn(domain, states, goals)
+    policy_fn(states, goals)
 
     nnet_time = time.time() - start_time
     states_per_sec = len(states) / nnet_time
@@ -234,4 +234,4 @@ def time_test(domain: Domain, heur_nnet_par: Optional[HeurNNetPar], policy_nnet_
         test_heur_nnet_par(heur_nnet_par, states, goals, actions)
 
     if policy_nnet_par is not None:
-        test_policy_nnet_par(domain, policy_nnet_par, states, goals, actions)
+        test_policy_nnet_par(policy_nnet_par, states, goals, actions)

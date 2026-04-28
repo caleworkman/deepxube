@@ -13,6 +13,9 @@
 * Sample from data buffer without replacement until all states seen
 * Fix up_gen_itrs being set to 100. Now defaults to up_itrs unless specifically set to a given value.
 * Separate Domain mixins/pathfinding algs for supervised node, edges, and sampling edges (for policy)
+* Remove policy_rand argument
+* Policy sampling method defined in PolicyNNet
+* Add max_itrs arg to solve
 
 ## 0.2.1
 * Consolidate search: Beam search -> special cases: greedy_policy, graph search -> special cases: batch weighted A* search, batch weighted Q* search 
