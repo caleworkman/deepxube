@@ -121,7 +121,7 @@ class PathFindEdgeSup(PathFindEdge[EdgesSupervisable, Any, InstanceEdgeSup], Pat
             inst_infos = [None for _ in states_start]
 
         instances: List[InstanceEdgeSup] = []
-        for node_root, action_init, label, inst_info in zip(nodes_root, actions_init, labels, inst_infos):
+        for node_root, action_init, label, inst_info in zip(nodes_root, actions_init, labels, inst_infos, strict=True):
             instances.append(InstanceEdgeSup(node_root, action_init, label, inst_info))
         self.times.record_time("instances", time.time() - start_time)
 
