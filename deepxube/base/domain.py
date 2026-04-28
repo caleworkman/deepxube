@@ -287,13 +287,19 @@ class ActsEnumFixed(ActsEnum[S, A, G], ActsFixed[S, A, G]):
 # supervised data generation
 class NodesSupervisable(Domain[S, A, G]):
     @abstractmethod
-    def get_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
+    def samp_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
         pass
 
 
 class EdgesSupervisable(Domain[S, A, G]):
     @abstractmethod
-    def get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+    def samp_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        pass
+
+
+class EdgesSampleable(Domain[S, A, G]):
+    @abstractmethod
+    def samp_edges(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A]]:
         pass
 
 
@@ -381,7 +387,7 @@ class GoalSampGoalStateSamp(GoalStateGoalPairSampleable[S, A, G], GoalSampleable
 
 
 # Problem instance generation mixins
-class StartGoalWalkable(GoalSampleableFromState[S, A, G], NodesSupervisable[S, A, G], EdgesSupervisable[S, A, G]):
+class StartGoalWalkable(GoalSampleableFromState[S, A, G], NodesSupervisable[S, A, G], EdgesSupervisable[S, A, G], EdgesSampleable[S, A, G]):
     """ Can sample start states, take actions to obtain another state, and sample a goal from that state"""
     @abstractmethod
     def sample_start_states(self, num_states: int) -> List[S]:
@@ -415,14 +421,21 @@ class StartGoalWalkable(GoalSampleableFromState[S, A, G], NodesSupervisable[S, A
 
         return states_start, goals
 
-    def get_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
+    def samp_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
         states_start: List[S] = self.sample_start_states(len(steps_gen))
         states_goal, _, path_costs = self.random_walk(states_start, steps_gen)
         goals: List[G] = self.sample_goal_from_state(states_start, states_goal)
 
         return states_start, goals, path_costs
 
-    def get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+    def samp_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        return self._get_edges_and_labels(steps_gen)
+
+    def samp_edges(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A]]:
+        states, goals, actions, _ = self._get_edges_and_labels(steps_gen)
+        return states, goals, actions
+
+    def _get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
         # start states
         states_start: List[S] = self.sample_start_states(len(steps_gen))
 
@@ -474,7 +487,8 @@ class GoalStartRevWalkable(GoalStateGoalPairSampleable[S, A, G]):
         pass
 
 
-class GoalStartRevWalkableActsRev(GoalStartRevWalkable[S, A, G], ActsRev[S, A, G], NodesSupervisable[S, A, G], EdgesSupervisable[S, A, G], ABC):
+class GoalStartRevWalkableActsRev(GoalStartRevWalkable[S, A, G], ActsRev[S, A, G], NodesSupervisable[S, A, G], EdgesSupervisable[S, A, G],
+                                  EdgesSampleable[S, A, G], ABC):
     def random_walk_rev_no_path_cost(self, states: List[S], num_steps_l: List[int]) -> List[S]:
         return self.random_walk(states, num_steps_l)[0]
 
@@ -504,13 +518,20 @@ class GoalStartRevWalkableActsRev(GoalStartRevWalkable[S, A, G], ActsRev[S, A, G
 
         return states_walk, actions_rev_l, path_costs
 
-    def get_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
+    def samp_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
         states_goal, goals = self.sample_goalstate_goal_pairs(len(steps_gen))
         states_start, _, path_costs = self.random_walk_rev(states_goal, steps_gen)
 
         return states_start, goals, path_costs
 
-    def get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+    def samp_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        return self._get_edges_and_labels(steps_gen)
+
+    def samp_edges(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A]]:
+        states, goals, actions, _ = self._get_edges_and_labels(steps_gen)
+        return states, goals, actions
+
+    def _get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
         # samp_goal_state_goal
         states_goal, goals = self.sample_goalstate_goal_pairs(len(steps_gen))
 

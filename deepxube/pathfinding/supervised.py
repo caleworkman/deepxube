@@ -1,5 +1,5 @@
 from typing import List, Any, Optional, Type, Tuple
-from deepxube.base.domain import Action, NodesSupervisable, EdgesSupervisable
+from deepxube.base.domain import Action, NodesSupervisable, EdgesSupervisable, EdgesSampleable
 from deepxube.base.pathfinding import Instance, InstanceNode, InstanceEdge, Node, EdgeQ, PathFindNode, PathFindEdge, PathFindSup
 from deepxube.factories.pathfinding_factory import pathfinding_factory
 import time
@@ -57,7 +57,7 @@ class PathFindNodeSup(PathFindNode[NodesSupervisable, Any, InstanceNodeSup], Pat
             instance.add_nodes_popped([node_root])
             instance.itr += 1
         start_time = time.time()
-        self.set_is_solved(nodes)
+        # self.set_is_solved(nodes)
         self.times.record_time("is_solved", time.time() - start_time)
 
         return nodes, []
@@ -67,7 +67,7 @@ class PathFindNodeSup(PathFindNode[NodesSupervisable, Any, InstanceNodeSup], Pat
 
     def make_instances_sup(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceNodeSup]:
         # get nodes and labels
-        states_start, goals, labels = self.domain.get_nodes_and_labels(steps_gen)
+        states_start, goals, labels = self.domain.samp_nodes_and_labels(steps_gen)
 
         # make instances
         nodes_root: List[Node] = self._create_root_nodes(states_start, goals, False)
@@ -100,7 +100,7 @@ class PathFindEdgeSup(PathFindEdge[EdgesSupervisable, Any, InstanceEdgeSup], Pat
             instance.itr += 1
             instance.add_edges_popped([edge])
         start_time = time.time()
-        self.set_is_solved([edge.node for edge in edges])
+        # self.set_is_solved([edge.node for edge in edges])
         self.times.record_time("is_solved", time.time() - start_time)
 
         return [], edges
@@ -110,7 +110,7 @@ class PathFindEdgeSup(PathFindEdge[EdgesSupervisable, Any, InstanceEdgeSup], Pat
 
     def make_instances_sup(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceEdgeSup]:
         # get edges and labels
-        states_start, goals, actions_init, labels = self.domain.get_edges_and_labels(steps_gen)
+        states_start, goals, actions_init, labels = self.domain.samp_edges_and_labels(steps_gen)
 
         # make root nodes
         nodes_root: List[Node] = self._create_root_nodes(states_start, goals, False)
@@ -123,6 +123,49 @@ class PathFindEdgeSup(PathFindEdge[EdgesSupervisable, Any, InstanceEdgeSup], Pat
         instances: List[InstanceEdgeSup] = []
         for node_root, action_init, label, inst_info in zip(nodes_root, actions_init, labels, inst_infos, strict=True):
             instances.append(InstanceEdgeSup(node_root, action_init, label, inst_info))
+        self.times.record_time("instances", time.time() - start_time)
+
+        return instances
+
+
+@pathfinding_factory.register_class("sup_p")
+class PathFindEdgeSamp(PathFindEdge[EdgesSampleable, Any, InstanceEdgeSup], PathFindSup[EdgesSampleable, InstanceEdgeSup]):
+    @staticmethod
+    def domain_type() -> Type[EdgesSampleable]:
+        return EdgesSampleable
+
+    def step(self, verbose: bool = False) -> Tuple[List[Node], List[EdgeQ]]:
+        edges: List[EdgeQ] = []
+        for instance in self.instances:
+            node_root: Node = instance.root_node
+            edge: EdgeQ = EdgeQ(node_root, instance.action, instance.path_cost_sup)
+            edges.append(edge)
+            node_root.backup_val = instance.path_cost_sup
+            instance.itr += 1
+            instance.add_edges_popped([edge])
+        start_time = time.time()
+        self.times.record_time("is_solved", time.time() - start_time)
+
+        return [], edges
+
+    def _compute_costs(self, instances: List[InstanceEdgeSup], edges_by_inst: List[List[EdgeQ]]) -> List[List[float]]:
+        raise NotImplementedError
+
+    def make_instances_sup(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[InstanceEdgeSup]:
+        # get edges and labels
+        states_start, goals, actions_init = self.domain.samp_edges(steps_gen)
+
+        # make root nodes
+        nodes_root: List[Node] = self._create_root_nodes(states_start, goals, False)
+
+        # make instances
+        start_time = time.time()
+        if inst_infos is None:
+            inst_infos = [None for _ in states_start]
+
+        instances: List[InstanceEdgeSup] = []
+        for node_root, action_init, inst_info in zip(nodes_root, actions_init, inst_infos, strict=True):
+            instances.append(InstanceEdgeSup(node_root, action_init, 0.0, inst_info))
         self.times.record_time("instances", time.time() - start_time)
 
         return instances

@@ -7,32 +7,9 @@ from deepxube.base.pathfinding import Node, EdgeQ, InstanceEdge, InstanceNode
 from deepxube.base.updater import UpdatePolicy, UpdateHeurV, UpdateHeurQ, UpdateSup
 from deepxube.factories.updater_factory import updater_factory
 from deepxube.utils.timing_utils import Times
-from deepxube.pathfinding.supervised import PathFindNodeSup, PathFindEdgeSup
+from deepxube.pathfinding.supervised import PathFindNodeSup, PathFindEdgeSup, PathFindEdgeSamp
 
 import numpy as np
-
-
-@updater_factory.register_class("update_policy_sup")
-class UpdatePolicySup(UpdatePolicy[Domain, Any, PathFindEdgeSup, InstanceEdge], UpdateSup[Domain, PathFindEdgeSup, InstanceEdge]):
-    @staticmethod
-    def domain_type() -> Type[Domain]:
-        return Domain
-
-    @staticmethod
-    def pathfind_type() -> Type[PathFindEdgeSup]:
-        return PathFindEdgeSup
-
-    def _get_instance_data_norb(self, instances: List[InstanceEdge], times: Times) -> List[NDArray]:
-        edges_popped: List[EdgeQ] = []
-        for instance in instances:
-            edges_popped.extend(instance.get_edges_popped())
-
-        states: List[State] = [edge.node.state for edge in edges_popped]
-        goals: List[Goal] = [edge.node.goal for edge in edges_popped]
-        actions: List[Action] = [edge.action for edge in edges_popped]
-
-        inputs_np: List[NDArray] = self.get_policy_nnet_par().to_np_train(states, goals, actions)
-        return inputs_np
 
 
 @updater_factory.register_class("update_heurv_sup")
@@ -80,3 +57,26 @@ class UpdateHeurQSup(UpdateHeurQ[Domain, Any, PathFindEdgeSup], UpdateSup[Domain
         ctgs_backup: List[float] = [edge.q_val for edge in edges_popped]
         inputs_np: List[NDArray] = self.get_heur_nnet_par().to_np(states, goals, [[action] for action in actions])
         return inputs_np + [np.array(ctgs_backup)]
+
+
+@updater_factory.register_class("update_policy_sup")
+class UpdatePolicySup(UpdatePolicy[Domain, Any, PathFindEdgeSamp, InstanceEdge], UpdateSup[Domain, PathFindEdgeSamp, InstanceEdge]):
+    @staticmethod
+    def domain_type() -> Type[Domain]:
+        return Domain
+
+    @staticmethod
+    def pathfind_type() -> Type[PathFindEdgeSamp]:
+        return PathFindEdgeSamp
+
+    def _get_instance_data_norb(self, instances: List[InstanceEdge], times: Times) -> List[NDArray]:
+        edges_popped: List[EdgeQ] = []
+        for instance in instances:
+            edges_popped.extend(instance.get_edges_popped())
+
+        states: List[State] = [edge.node.state for edge in edges_popped]
+        goals: List[Goal] = [edge.node.goal for edge in edges_popped]
+        actions: List[Action] = [edge.action for edge in edges_popped]
+
+        inputs_np: List[NDArray] = self.get_policy_nnet_par().to_np_train(states, goals, actions)
+        return inputs_np
