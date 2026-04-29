@@ -102,7 +102,7 @@ def test_train_solve_heur(pathfind_tr_str: str, pathfind_solve_str: str, heur_ty
         # check soln
         goal_node: Optional[Node] = instance.goal_node
         if goal_node is not None:
-            path_states, path_actions, path_cost = get_path(goal_node)
+            path_states, path_actions, _, path_cost = get_path(goal_node)
             assert is_valid_soln(instance.root_node.state, instance.root_node.goal, path_actions, domain)
 
     print(pathfind_perf.to_string())

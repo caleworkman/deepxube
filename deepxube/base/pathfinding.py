@@ -92,7 +92,7 @@ class Node:
         return descendants
 
 
-def get_path(node: Node) -> Tuple[List[State], List[Action], float]:
+def get_path(node: Node) -> Tuple[List[State], List[Action], List[float], float]:
     """ Gets path from the start state to the goal state associated with the input node
 
     :param node: goal node
@@ -100,6 +100,7 @@ def get_path(node: Node) -> Tuple[List[State], List[Action], float]:
     """
     path: List[State] = []
     actions: List[Action] = []
+    tcs: List[float] = []
 
     parent_node: Node = node
     while parent_node.parent is not None:
@@ -107,14 +108,17 @@ def get_path(node: Node) -> Tuple[List[State], List[Action], float]:
 
         assert parent_node.parent_action is not None, "parent_action should not be None"
         actions.append(parent_node.parent_action)
+        tcs.append(parent_node.parent_t_cost)
         parent_node = parent_node.parent
 
     path.append(parent_node.state)
 
     path = path[::-1]
     actions = actions[::-1]
+    tcs = tcs[::-1]
 
-    return path, actions, node.path_cost
+    assert sum(tcs) == node.path_cost, "sum of transition costs should equal path cost"
+    return path, actions, tcs, node.path_cost
 
 
 class EdgeQ:

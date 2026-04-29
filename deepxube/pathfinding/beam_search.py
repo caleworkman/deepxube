@@ -18,6 +18,7 @@ class InstanceBeam(Instance, ABC):
         self.beam_size: int = 1
         self.temp: float = 0.0
         self.eps: float = 0.0
+        self.rollout: bool = False
 
     def set_beam_size(self, beam_size: int) -> None:
         assert beam_size >= 1
@@ -31,15 +32,22 @@ class InstanceBeam(Instance, ABC):
         assert (eps >= 0.0) and (eps <= 1.0)
         self.eps = eps
 
+    def set_rollout(self, rollout: bool) -> None:
+        self.rollout = rollout
+
     def frontier_size(self) -> int:
         return len(self._nodes_curr)
 
     def record_goal(self, nodes: List[Node]) -> None:
-        for node in nodes:
-            assert node.is_solved is not None
-            if node.is_solved:
-                if (self.goal_node is None) or (self.goal_node.path_cost > node.path_cost):
-                    self.goal_node = node
+        if self.rollout:
+            assert len(nodes) == 1
+            self.goal_node = nodes[0]
+        else:
+            for node in nodes:
+                assert node.is_solved is not None
+                if node.is_solved:
+                    if (self.goal_node is None) or (self.goal_node.path_cost > node.path_cost):
+                        self.goal_node = node
 
     def select_idxs_from_logits(self, logits: List[float]) -> List[int]:
         num_logits: int = len(logits)
@@ -67,7 +75,10 @@ class InstanceBeam(Instance, ABC):
         return next_idxs
 
     def finished(self) -> bool:
-        return self.has_soln()
+        if self.rollout:
+            return False
+        else:
+            return self.has_soln()
 
 
 D = TypeVar('D', bound=Domain)
@@ -75,11 +86,12 @@ IBeam = TypeVar('IBeam', bound=InstanceBeam)
 
 
 class BeamSearch(PathFind[D, FNs, IBeam], ABC):
-    def __init__(self, domain: D, functions: FNs, beam_size: int = 1, temp: float = 0.0, eps: float = 0.0):
+    def __init__(self, domain: D, functions: FNs, beam_size: int = 1, temp: float = 0.0, eps: float = 0.0, rollout: bool = False):
         super().__init__(domain, functions)
         self.beam_size_default: int = beam_size
         self.temp_default: float = temp
         self.eps_default: float = eps
+        self.rollout: bool = rollout
 
     def _construct_instances(self, inst_cls: type[IBeam], nodes_root: List[Node], inst_infos: Optional[List[Any]], beam_size: Optional[int],
                              temp: Optional[float], eps: Optional[float]) -> List[IBeam]:
@@ -95,11 +107,12 @@ class BeamSearch(PathFind[D, FNs, IBeam], ABC):
             instance.set_beam_size(beam_size_inst)
             instance.set_temp(temp_inst)
             instance.set_eps(eps_inst)
+            instance.set_rollout(self.rollout)
 
         return instances
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}(beam_size={self.beam_size_default}, temp={self.temp_default}, eps={self.eps_default})"
+        return f"{type(self).__name__}(beam_size={self.beam_size_default}, temp={self.temp_default}, eps={self.eps_default}, rollout={self.rollout})"
 
 
 class InstanceNodeBeam(InstanceNode, InstanceBeam):
@@ -254,6 +267,7 @@ class BeamSearchParser(Parser, ABC):
                 kwargs["eps"] = float(eps_re.group(1))
             else:
                 raise ValueError(f"Unexpected argument {args_str_i!r}")
+        kwargs["rollout"] = False
         return kwargs
 
     def help(self) -> str:
@@ -293,3 +307,42 @@ class BeamSearchNodeHasPolicyParser(BeamSearchParser):
 class BeamSearchEdgeHasPolicyParser(BeamSearchParser):
     def _alg_name(self) -> str:
         return "beam_q_p"
+
+
+# Rollout - special case of beam search where no goal test is done
+
+@pathfinding_factory.register_class("rollout_p")
+class RolloutPolicy(BeamSearchPolicy):
+    pass
+
+
+class RolloutParser(Parser, ABC):
+    def parse(self, args_str: str) -> Dict[str, Any]:
+        args_str_l: List[str] = args_str.split("_")
+        kwargs: Dict[str, Any] = dict()
+        for args_str_i in args_str_l:
+            temp_re = re.search(r"^(\S+)T", args_str_i)
+            eps_re = re.search(r"^(\S+)E", args_str_i)
+            if temp_re is not None:
+                kwargs["temp"] = float(temp_re.group(1))
+            elif eps_re is not None:
+                kwargs["eps"] = float(eps_re.group(1))
+            else:
+                raise ValueError(f"Unexpected argument {args_str_i!r}")
+        kwargs["beam_size"] = 1
+        kwargs["rollout"] = True
+        return kwargs
+
+    def help(self) -> str:
+        return ("<float>T (temperature for Boltzmann distribution), <float>E (epsilon for chance to randomly select node).\n"
+                f"E.g. {self._alg_name()}.1.0T_0.1E")
+
+    @abstractmethod
+    def _alg_name(self) -> str:
+        pass
+
+
+@pathfinding_factory.register_parser("rollout_p")
+class RolloutPolicyParser(RolloutParser):
+    def _alg_name(self) -> str:
+        return "rollout_p"
