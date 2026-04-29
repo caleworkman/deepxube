@@ -93,7 +93,7 @@ class PolicyNNet(DeepXubeNNet[PNNetIn], ABC):
         """
 
         :param states_goals_actions:
-        :return: loss
+        :return: loss  IMPORTANT: do not perform reduction as main process will take mean. I.e. dimensionality of loss should be (N,) where N is the batch size
         """
         pass
 
@@ -111,6 +111,7 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
 
     def _forward_eval(self, states_goals: List[Tensor]) -> List[Tensor]:
         # TODO use num_samp
+        breakpoint()
         z: Tensor = self.norm_dist.sample((states_goals[0].shape[0],) + self.latent_shape()).to(states_goals[0].device)
         recons: List[Tensor] = self.decode(states_goals, z)
         return recons + [self.norm_dist.log_prob(z).sum(dim=1, keepdim=True)]
@@ -129,7 +130,8 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
         actions_recon: List[Tensor] = self.decode(states_goals, z)
 
         loss_recon: Tensor = self._compute_recon_loss(actions_proc, actions_recon)
-        loss: Tensor = loss_recon + (self.kl_weight * loss_kl)
+        breakpoint()
+        loss: Tensor = loss_recon + (self.kl_weight * loss_kl)  # TODO no reduction
 
         # print_str: str = f"loss_recon: {loss_recon.item():.2E}, loss_kl: {loss_kl.item():.2E}"
         return loss

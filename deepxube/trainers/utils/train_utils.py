@@ -75,7 +75,8 @@ def train_policy_nnet_step(policy: PolicyNNet, states_goals_actions_np: List[NDA
     states_goals_actions: List[Tensor] = nnet_utils.to_pytorch_input(states_goals_actions_np, device)
 
     # forward
-    loss: Tensor = policy(states_goals_actions)[0]
+    loss_arr: Tensor = policy(states_goals_actions)[0]
+    loss: Tensor = loss_arr.mean()
 
     # backwards
     loss.backward()
