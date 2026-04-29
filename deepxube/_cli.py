@@ -138,13 +138,13 @@ def viz(args: argparse.Namespace) -> None:
 
     if args.soln:
         solved: bool = data['solved'][args.idx]
-        if solved:
-            states_on_path: List[State] = data['states_on_path'][args.idx]
+        states_on_path: Optional[List[State]] = data['states_on_path'][args.idx]
+        if states_on_path is not None:
             state_idx: int = 0
             state_idx_max: int = len(states_on_path) - 1
             plt.show(block=False)
             while True:
-                act_str = input(f"State idx {state_idx} of {state_idx_max} on solution path. Next state (n), Previous state (p), or state idx: ")
+                act_str = input(f"State idx {state_idx} of {state_idx_max} on path. Next state (n), Previous state (p), or state idx: ")
                 if len(act_str) == 0:
                     break
                 if act_str.upper() == "N":
@@ -161,7 +161,7 @@ def viz(args: argparse.Namespace) -> None:
                         _viz_state_goal_update(domain, state, goal, fig)
 
                         print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
-                        if state_idx == state_idx_max:
+                        if (state_idx == state_idx_max) and solved:
                             assert domain.is_solved([state], [goal])[0]
                 elif act_str.upper() == "P":
                     if state_idx > 0:
@@ -177,7 +177,7 @@ def viz(args: argparse.Namespace) -> None:
                     _viz_state_goal_update(domain, state, goal, fig)
                     print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
         else:
-            input("Not solved (press enter to quit): ")
+            input("No path (press enter to quit): ")
     else:
         if isinstance(domain, StringToAct):
             print(domain.string_to_action_help())

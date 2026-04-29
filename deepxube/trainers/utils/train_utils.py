@@ -75,7 +75,7 @@ def train_policy_nnet_step(policy: PolicyNNet, states_goals_actions_np: List[NDA
     states_goals_actions: List[Tensor] = nnet_utils.to_pytorch_input(states_goals_actions_np, device)
 
     # forward
-    loss, print_str = policy.train_fprop(states_goals_actions)
+    loss: Tensor = policy(states_goals_actions)[0]
 
     # backwards
     loss.backward()
@@ -85,7 +85,6 @@ def train_policy_nnet_step(policy: PolicyNNet, states_goals_actions_np: List[NDA
 
     # display progress
     if (train_args.display > 0) and (train_itr % train_args.display == 0):
-        print(f"Itr: %i, loss: %.2E, {print_str}, "
-              f"Time: {time.time() - start_time:.2f}" % (train_itr, loss.item()))
+        print(f"Itr: %i, loss: %.2E, Time: {time.time() - start_time:.2f}" % (train_itr, loss.item()))
 
     return float(loss.item())

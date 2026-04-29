@@ -107,6 +107,7 @@ def get_path(node: Node) -> Tuple[List[State], List[Action], List[float], float]
         path.append(parent_node.state)
 
         assert parent_node.parent_action is not None, "parent_action should not be None"
+        assert parent_node.parent_t_cost is not None, "parent_t_cost should not be None"
         actions.append(parent_node.parent_action)
         tcs.append(parent_node.parent_t_cost)
         parent_node = parent_node.parent

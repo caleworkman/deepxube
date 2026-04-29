@@ -219,13 +219,12 @@ def solve_cli(args: argparse.Namespace) -> None:
                     path_states = path_states[:(solved_idx + 1)]
                     path_actions = path_actions[:solved_idx]
                     tcs = tcs[:solved_idx]
-                    path_cost: float = sum(tcs)
+                    path_cost = sum(tcs)
             else:
                 solved = True
 
             if solved:
                 assert is_valid_soln(state, goal, path_actions, domain)
-
 
         results["actions"].append(path_actions)
         results["states_on_path"].append(path_states)

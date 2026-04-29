@@ -73,8 +73,14 @@ class PolicyNNet(DeepXubeNNet[PNNetIn], ABC):
         super().__init__(nnet_input)
         self.num_samp: int = num_samp
 
+    def forward(self, inputs: List[Tensor]) -> List[Tensor]:
+        if self.training:
+            return [self._forward_train(inputs)]
+        else:
+            return self._forward_eval(inputs)
+
     @abstractmethod
-    def forward(self, states_goals: List[Tensor]) -> List[Tensor]:
+    def _forward_eval(self, states_goals: List[Tensor]) -> List[Tensor]:
         """ Condition on states and goals to sample self.num_samp actions
 
         :param states_goals:
@@ -83,11 +89,11 @@ class PolicyNNet(DeepXubeNNet[PNNetIn], ABC):
         pass
 
     @abstractmethod
-    def train_fprop(self, states_goals_actions: List[Tensor]) -> Tuple[Tensor, str]:
+    def _forward_train(self, states_goals_actions: List[Tensor]) -> Tensor:
         """
 
         :param states_goals_actions:
-        :return: loss, info to print
+        :return: loss
         """
         pass
 
@@ -103,13 +109,13 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
         self.kl_weight: float = kl_weight
         self.mse_criterion = nn.MSELoss()
 
-    def forward(self, states_goals: List[Tensor]) -> List[Tensor]:
+    def _forward_eval(self, states_goals: List[Tensor]) -> List[Tensor]:
         # TODO use num_samp
         z: Tensor = self.norm_dist.sample((states_goals[0].shape[0],) + self.latent_shape()).to(states_goals[0].device)
         recons: List[Tensor] = self.decode(states_goals, z)
         return recons + [self.norm_dist.log_prob(z).sum(dim=1, keepdim=True)]
 
-    def train_fprop(self, states_goals_actions: List[Tensor]) -> Tuple[Tensor, str]:
+    def _forward_train(self, states_goals_actions: List[Tensor]) -> Tensor:
         split_idx: int = self.nnet_input.states_goals_actions_split_idx()
         states_goals: List[Tensor] = states_goals_actions[:split_idx]
         actions: List[Tensor] = states_goals_actions[split_idx:]
@@ -125,8 +131,8 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
         loss_recon: Tensor = self._compute_recon_loss(actions_proc, actions_recon)
         loss: Tensor = loss_recon + (self.kl_weight * loss_kl)
 
-        print_str: str = f"loss_recon: {loss_recon.item():.2E}, loss_kl: {loss_kl.item():.2E}"
-        return loss, print_str
+        # print_str: str = f"loss_recon: {loss_recon.item():.2E}, loss_kl: {loss_kl.item():.2E}"
+        return loss
 
     @abstractmethod
     def latent_shape(self) -> Tuple[int, ...]:

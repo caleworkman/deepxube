@@ -17,7 +17,8 @@
 * Policy sampling method defined in PolicyNNet
 * Add max_itrs arg to solve
 * get_path returns list of transition costs
-* added rollout pathfinding alg, special case of beam search that does not check is_solved when searching
+* Added rollout pathfinding alg, special case of beam search that does not check is_solved when searching
+* PolicyNNet has _forward_train and _forward_eval abstract methods to unify forward method
 
 ## 0.2.1
 * Consolidate search: Beam search -> special cases: greedy_policy, graph search -> special cases: batch weighted A* search, batch weighted Q* search 

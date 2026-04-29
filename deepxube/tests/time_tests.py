@@ -193,10 +193,10 @@ def test_policy_nnet_par(policy_nnet_par: PolicyNNetPar, states: List[State], go
     # train fprop
     train_data: List[Tensor] = nnet_utils.to_pytorch_input(train_data_np, device)
     nnet.train()
-    nnet.train_fprop(train_data)
+    nnet(train_data)
 
     start_time = time.time()
-    nnet.train_fprop(train_data)
+    nnet(train_data)
     nnet_train_out_time = time.time() - start_time
     states_per_sec = len(states) / nnet_train_out_time
     print("Computed policy output for training for %i states in %s seconds (%.2f/second)" % (len(states), nnet_train_out_time, states_per_sec))
