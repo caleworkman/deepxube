@@ -123,7 +123,7 @@ class Update(Generic[D, FNs, P, Inst], ABC):
         self.targ_update_nums: Dict[str, int] = dict()
         self.nnet_par_dict: Dict[str, NNetPar] = dict()
         self.nnet_file_dict: Dict[str, str] = dict()
-        for nnet_name, nnet_file, nnet_par in domain.get_nnet_pars():
+        for nnet_name, (nnet_file, nnet_par) in domain.get_nnet_par_dict().items():
             self.add_nnet_par(nnet_name, nnet_par)
             self.set_nnet_file(nnet_name, nnet_file)
         self.nnet_par_info_dict: Dict[str, NNetParInfo] = dict()

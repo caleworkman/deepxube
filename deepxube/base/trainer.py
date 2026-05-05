@@ -25,6 +25,7 @@ import pickle
 import os
 import shutil
 import time
+import re
 
 
 @dataclass
@@ -38,9 +39,11 @@ class TrainArgs:
     :param loss_thresh: Loss threshold for updating.
     :param targ_up_searches: If > 0, do a greedy search with updater for minimum given number of searches to test
     if target network should be updated. Otherwise, it will be updated automatically.
-    :param display: Number of iterations to display progress when training nnet. No display if 0.
     :param skip_heur: Skip training of heuristic function
     :param skip_policy: Skip training of policy
+    :param checkpoint: Save checkpoint file of network being trained at initialization and at every given number of update checks.
+    Checkpoint number given is training iteration, not update number. If 0 then checkpointing is not done.
+    :param display: Number of iterations to display progress when training nnet. No display if 0.
     """
     batch_size: int
     max_itrs: int
@@ -50,6 +53,7 @@ class TrainArgs:
     targ_up_searches: int = 0
     skip_heur: bool = False
     skip_policy: bool = False
+    checkpoint: int = 0
     display: int = 100
 
 
@@ -203,6 +207,9 @@ class Train(Generic[NNet, Up], ABC):
             self.nnet = cast(NNet, nnet_utils.load_nnet(self.nnet_file, self.nnet))
         else:
             torch.save(self.nnet.state_dict(), self.nnet_file)
+            if (self.train_args.checkpoint > 0) and (self.status.update_num == 0):
+                self._save_checkpoint()
+
         if not os.path.isfile(self.nnet_targ_file):
             torch.save(self.nnet.state_dict(), self.nnet_targ_file)
         self.optimizer: Optimizer = self.nnet.get_optimizer()
@@ -253,6 +260,8 @@ class Train(Generic[NNet, Up], ABC):
         # save nnet
         start_time = time.time()
         torch.save(self.nnet.state_dict(), self.nnet_file)
+        if (self.train_args.checkpoint > 0) and (self.status.update_num % self.train_args.checkpoint == 0):
+            self._save_checkpoint()
         times.record_time("save_net", time.time() - start_time)
 
         # update nnet
@@ -373,6 +382,11 @@ class Train(Generic[NNet, Up], ABC):
         print(f"Data - {', '.join(post_up_info_l)}")
 
         times.record_time("up_end", time.time() - start_time)
+
+    def _save_checkpoint(self) -> None:
+        assert re.compile(".*.pt$").match(self.nnet_file) is not None, "nnet file should end in '.pt'"
+        nnet_file_chkpt: str = re.sub(".pt$", f"_chkpt_{self.status.itr}.pt", self.nnet_file)
+        torch.save(self.nnet.state_dict(), nnet_file_chkpt)
 
     @abstractmethod
     def _add_post_up_info(self) -> List[str]:

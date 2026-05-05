@@ -134,6 +134,9 @@ def init_nnet(nnet_par: NNetPar) -> Tuple[nn.Module, torch.device]:
     if on_gpu:
         nnet = nn.DataParallel(nnet)
 
+    num_trainable = sum(p.numel() for p in nnet.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters: {format(num_trainable, ',')}")
+
     return nnet, device
 
 
