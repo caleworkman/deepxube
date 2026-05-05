@@ -93,7 +93,8 @@ class PolicyNNet(DeepXubeNNet[PNNetIn], ABC):
         """
 
         :param states_goals_actions:
-        :return: loss  IMPORTANT: do not perform reduction as main process will take mean. I.e. dimensionality of loss should be (N,) where N is the batch size
+        :return: loss  IMPORTANT: do not perform reduction as main process will take mean so that DataParallel can be used.
+        I.e. dimensionality of loss should be (N,) where N is the batch size
         """
         pass
 
@@ -107,14 +108,23 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
         super().__init__(nnet_input, num_samp)
         self.norm_dist = torch.distributions.Normal(0, 1)
         self.kl_weight: float = kl_weight
-        self.mse_criterion = nn.MSELoss()
 
     def _forward_eval(self, states_goals: List[Tensor]) -> List[Tensor]:
-        # TODO use num_samp
-        breakpoint()
-        z: Tensor = self.norm_dist.sample((states_goals[0].shape[0],) + self.latent_shape()).to(states_goals[0].device)
-        recons: List[Tensor] = self.decode(states_goals, z)
-        return recons + [self.norm_dist.log_prob(z).sum(dim=1, keepdim=True)]
+        recons_l: List[List[Tensor]] = []
+        z_l: List[Tensor] = []
+        for _ in range(self.num_samp):
+            z: Tensor = self.norm_dist.sample((states_goals[0].shape[0],) + self.latent_shape()).to(states_goals[0].device)
+            recons: List[Tensor] = self.decode(states_goals, z)
+            recons_l.append(recons)
+            z_l.append(z)
+
+        recons_all: List[Tensor] = []
+        for recon_idx in range(len(recons_l[0])):
+            recons_i: Tensor = torch.stack([recons_i[recon_idx] for recons_i in recons_l], dim=1)
+            recons_all.append(recons_i)
+
+        z_all: Tensor = torch.stack(z_l, dim=1)
+        return recons_all + [self.norm_dist.log_prob(z_all).sum(dim=2)]
 
     def _forward_train(self, states_goals_actions: List[Tensor]) -> Tensor:
         split_idx: int = self.nnet_input.states_goals_actions_split_idx()
@@ -123,15 +133,14 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
 
         actions_proc, mu, logvar = self.encode(states_goals, actions)
         sum_dims: Tuple[int, ...] = tuple(range(1, len(mu.shape)))
-        loss_kl: Tensor = torch.mean(-0.5 * torch.sum(1 + logvar - mu ** 2 - logvar.exp(), dim=sum_dims), dim=0)
+        loss_kl: Tensor = -0.5 * torch.sum(1 + logvar - mu ** 2 - logvar.exp(), dim=sum_dims)
 
         sigma = torch.exp(logvar / 2.0)
         z = mu + sigma * self.norm_dist.sample(mu.shape).to(mu.device)
         actions_recon: List[Tensor] = self.decode(states_goals, z)
 
         loss_recon: Tensor = self._compute_recon_loss(actions_proc, actions_recon)
-        breakpoint()
-        loss: Tensor = loss_recon + (self.kl_weight * loss_kl)  # TODO no reduction
+        loss: Tensor = loss_recon + (self.kl_weight * loss_kl)
 
         # print_str: str = f"loss_recon: {loss_recon.item():.2E}, loss_kl: {loss_kl.item():.2E}"
         return loss
@@ -159,10 +168,12 @@ class PolicyVAE(PolicyNNet[PNNetIn]):
         """
 
     def _compute_recon_loss(self, action_proc: List[Tensor], actions_recon: List[Tensor]) -> Tensor:
-        actions_proc_flat: Tensor = _flatten_list(action_proc)
-        actions_recon_flat: Tensor = _flatten_list(actions_recon)
-        loss_recon: Tensor = self.mse_criterion(actions_proc_flat, actions_recon_flat)
-        return loss_recon
+        loss_recons: List[Tensor] = []
+        for actions_proc_i, actions_recon_i in zip(action_proc, actions_recon):
+            loss_recon_i: Tensor = torch.mean((actions_recon_i - actions_proc_i) ** 2, dim=1)
+            loss_recons.append(loss_recon_i)
+
+        return torch.stack(loss_recons, dim=0).mean(dim=0)
 
     def __repr__(self) -> str:
         return f"{super().__repr__()}\nKL Weight: {self.kl_weight}"

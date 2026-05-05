@@ -5,4 +5,3 @@
 state in cases there are no applicable actions.
 * Solver get_num_ground_rules behaves differently if self.ctl_rand.statistics is 
 looked at before self.ctl_rand.solve()
-* PolicyVAE subclass currently does not sample multiple actions based on given argument

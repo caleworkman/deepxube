@@ -189,7 +189,7 @@ class Domain(ABC, Generic[S, A, G]):
     def _add_nnet_par(self, nnet_name: str, nnet_file: str, nnet_par: NNetPar) -> None:
         self.nnet_par_dict[nnet_name] = (nnet_file, nnet_par)
 
-    def __getstate__(self):
+    def __getstate__(self) -> Dict:
         self.nnet_fn_dict = dict()
         return self.__dict__
 
