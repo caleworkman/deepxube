@@ -1,13 +1,18 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional, Set, TypeVar, Generic, Dict, Any
+
+import torch
+from torch import nn
 import numpy as np
 from clingo.solving import Model as ModelCl
 
 from deepxube.logic.logic_objects import Atom, Model
 from deepxube.utils import misc_utils
-from deepxube.nnet.nnet_utils import NNetPar, NNetCallable
+from deepxube.nnet.nnet_utils import NNetPar, NNetCallable, load_nnet
 from deepxube.utils.timing_utils import Times
+
 from matplotlib.figure import Figure
+import os
 import random
 import time
 from numpy.typing import NDArray
@@ -71,7 +76,8 @@ G = TypeVar('G', bound=Goal)
 # TODO method for downloading data?
 class Domain(ABC, Generic[S, A, G]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.nnet_pars: List[Tuple[str, str, NNetPar]] = []
+        self.nnet_par_dict: Dict[str, Tuple[str, NNetPar]] = dict()
+        self.nnet_fn_dict: Dict[str, NNetCallable] = dict()
 
     @abstractmethod
     def sample_problem_instances(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
@@ -113,23 +119,25 @@ class Domain(ABC, Generic[S, A, G]):
         """
         pass
 
-    def sample_next_state(self, states: List[S]) -> Tuple[List[S], List[float]]:
+    def sample_next_state(self, states: List[S]) -> Tuple[List[S], List[A], List[float]]:
         """ Get random next state and transition cost given the current state
 
         :param states: List of states
-        :return: Next states, transition costs
+        :return: Next states, actions taken, transition costs
         """
         actions_rand: List[A] = self.sample_state_action(states)
-        return self.next_state(states, actions_rand)
+        states_next, tcs = self.next_state(states, actions_rand)
+        return states_next, actions_rand, tcs
 
-    def random_walk(self, states: List[S], num_steps_l: List[int]) -> Tuple[List[S], List[float]]:
+    def random_walk(self, states: List[S], num_steps_l: List[int]) -> Tuple[List[S], List[List[A]], List[float]]:
         """ Perform a random walk on the given states for the given number of steps
 
         :param states: List of states
         :param num_steps_l: number of steps to take for each state
-        :return: The resulting state and the path cost for each random walk
+        :return: The resulting state, actions taken, and the path cost for each random walk
         """
         states_walk: List[S] = [state for state in states]
+        actions_l: List[List[A]] = [[] for _ in states]
         path_costs: List[float] = [0.0 for _ in states]
 
         num_steps: NDArray[np.int_] = np.array(num_steps_l)
@@ -139,24 +147,51 @@ class Domain(ABC, Generic[S, A, G]):
             idxs: NDArray[np.int_] = np.where(steps_lt)[0]
             states_to_move = [states_walk[idx] for idx in idxs]
 
-            states_moved, tcs = self.sample_next_state(states_to_move)
+            states_moved, actions, tcs = self.sample_next_state(states_to_move)
 
             idx: int
             for move_idx, idx in enumerate(idxs):
                 states_walk[idx] = states_moved[move_idx]
+                actions_l[idx].append(actions[move_idx])
                 path_costs[idx] += tcs[move_idx]
 
             num_steps_curr[idxs] = num_steps_curr[idxs] + 1
 
             steps_lt[idxs] = num_steps_curr[idxs] < num_steps[idxs]
 
-        return states_walk, path_costs
+        return states_walk, actions_l, path_costs
 
-    def get_nnet_pars(self) -> List[Tuple[str, str, NNetPar]]:
-        return self.nnet_pars
+    def get_nnet_par_dict(self) -> Dict[str, Tuple[str, NNetPar]]:
+        return self.nnet_par_dict.copy()
 
     def set_nnet_fns(self, nnet_fn_dict: Dict[str, NNetCallable]) -> None:
-        pass
+        for nnet_name, nnet_fn in nnet_fn_dict.items():
+            if nnet_name in self.nnet_par_dict.keys():
+                self.nnet_fn_dict[nnet_name] = nnet_fn
+
+    def get_nnet_fn(self, nnet_fn_name: str) -> NNetCallable:
+        nnet_fn: Optional[NNetCallable] = self.nnet_fn_dict.get(nnet_fn_name)
+        if nnet_fn is None:
+            device: torch.device = torch.device("cpu")
+            if ('CUDA_VISIBLE_DEVICES' in os.environ) and torch.cuda.is_available():
+                device = torch.device("cuda:%i" % 0)
+
+            assert nnet_fn_name in self.nnet_par_dict.keys(), f"nnet_fn_name {nnet_fn_name} has not been added to nnet_par_dict"
+            nnet_file, nnet_par = self.nnet_par_dict[nnet_fn_name]
+            nnet: nn.Module = nnet_par.get_nnet()
+            nnet = load_nnet(nnet_file, nnet, device=device)
+            nnet.to(device)
+
+            nnet_fn = nnet_par.get_nnet_fn(nnet, None, device, None)
+
+        return nnet_fn
+
+    def _add_nnet_par(self, nnet_name: str, nnet_file: str, nnet_par: NNetPar) -> None:
+        self.nnet_par_dict[nnet_name] = (nnet_file, nnet_par)
+
+    def __getstate__(self) -> Dict:
+        self.nnet_fn_dict = dict()
+        return self.__dict__
 
 
 # Visualization mixins
@@ -204,12 +239,11 @@ class ActsRev(Domain[S, A, G], ABC):
 
     """
     @abstractmethod
-    def rev_action(self, states: List[S], actions: List[A]) -> List[A]:
-        """ Get the reverse of the given action
+    def sample_rev_state(self, states: List[S]) -> Tuple[List[S], List[A], List[float]]:
+        """ Get random reverse state, reverse action that returns reverse state to given state and transition cost of that reverse action
 
         :param states: List of states
-        :param actions: List of actions
-        :return: Reverse of given action in the given state
+        :return: Reverse states, reverse actions, reverse transition costs
         """
         pass
 
@@ -280,6 +314,25 @@ class ActsEnumFixed(ActsEnum[S, A, G], ActsFixed[S, A, G]):
 
     def get_num_acts(self) -> int:
         return len(self.get_actions_fixed())
+
+
+# supervised data generation
+class NodesSupervisable(Domain[S, A, G]):
+    @abstractmethod
+    def samp_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
+        pass
+
+
+class EdgesSupervisable(Domain[S, A, G]):
+    @abstractmethod
+    def samp_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        pass
+
+
+class EdgesSampleable(Domain[S, A, G]):
+    @abstractmethod
+    def samp_edges(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A]]:
+        pass
 
 
 # Goal mixins
@@ -366,7 +419,7 @@ class GoalSampGoalStateSamp(GoalStateGoalPairSampleable[S, A, G], GoalSampleable
 
 
 # Problem instance generation mixins
-class StartGoalWalkable(GoalSampleableFromState[S, A, G]):
+class StartGoalWalkable(GoalSampleableFromState[S, A, G], NodesSupervisable[S, A, G], EdgesSupervisable[S, A, G], EdgesSampleable[S, A, G]):
     """ Can sample start states, take actions to obtain another state, and sample a goal from that state"""
     @abstractmethod
     def sample_start_states(self, num_states: int) -> List[S]:
@@ -400,6 +453,42 @@ class StartGoalWalkable(GoalSampleableFromState[S, A, G]):
 
         return states_start, goals
 
+    def samp_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
+        states_start: List[S] = self.sample_start_states(len(steps_gen))
+        states_goal, _, path_costs = self.random_walk(states_start, steps_gen)
+        goals: List[G] = self.sample_goal_from_state(states_start, states_goal)
+
+        return states_start, goals, path_costs
+
+    def samp_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        return self._get_edges_and_labels(steps_gen)
+
+    def samp_edges(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A]]:
+        states, goals, actions, _ = self._get_edges_and_labels(steps_gen)
+        return states, goals, actions
+
+    def _get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        # start states
+        states_start: List[S] = self.sample_start_states(len(steps_gen))
+
+        # first step
+        states_start_1step, actions_init, tcs_step1 = self.sample_next_state(states_start)
+
+        # account for step_gen == 0
+        for idx in np.where(np.array(steps_gen) == 0)[0]:
+            states_start_1step[idx] = states_start[idx]
+            tcs_step1[idx] = 0.0
+
+        # random walk
+        steps_gen_minus_1: List[int] = np.maximum(np.array(steps_gen) - 1, 0).tolist()
+        states_goal, _, path_costs = self.random_walk(states_start_1step, steps_gen_minus_1)
+        path_costs = (np.array(tcs_step1) + np.array(path_costs)).tolist()
+
+        # sample goal
+        goals: List[G] = self.sample_goal_from_state(states_start, states_goal)
+
+        return states_start, goals, actions_init, path_costs
+
 
 class GoalStartRevWalkable(GoalStateGoalPairSampleable[S, A, G]):
     def sample_problem_instances(self, num_steps_l: List[int], times: Optional[Times] = None) -> Tuple[List[S], List[G]]:
@@ -414,13 +503,13 @@ class GoalStartRevWalkable(GoalStateGoalPairSampleable[S, A, G]):
 
         # random walk to get start states
         start_time = time.time()
-        states_start: List[S] = self.random_walk_rev(states_goal, num_steps_l)
+        states_start: List[S] = self.random_walk_rev_no_path_cost(states_goal, num_steps_l)
         times.record_time("random_walk", time.time() - start_time)
 
         return states_start, goals
 
     @abstractmethod
-    def random_walk_rev(self, states: List[S], num_steps_l: List[int]) -> List[S]:
+    def random_walk_rev_no_path_cost(self, states: List[S], num_steps_l: List[int]) -> List[S]:
         """ Domain need not be reversible as the distance of a path obtained by a number reverse steps can be roughly correlated with the number of steps
 
         :param states: List of states
@@ -430,9 +519,69 @@ class GoalStartRevWalkable(GoalStateGoalPairSampleable[S, A, G]):
         pass
 
 
-class GoalStartRevWalkableActsRev(GoalStartRevWalkable[S, A, G], ActsRev[S, A, G], ABC):
-    def random_walk_rev(self, states: List[S], num_steps_l: List[int]) -> List[S]:
+class GoalStartRevWalkableActsRev(GoalStartRevWalkable[S, A, G], ActsRev[S, A, G], NodesSupervisable[S, A, G], EdgesSupervisable[S, A, G],
+                                  EdgesSampleable[S, A, G], ABC):
+    def random_walk_rev_no_path_cost(self, states: List[S], num_steps_l: List[int]) -> List[S]:
         return self.random_walk(states, num_steps_l)[0]
+
+    def random_walk_rev(self, states: List[S], num_steps_l: List[int]) -> Tuple[List[S], List[List[A]], List[float]]:
+        states_walk: List[S] = [state for state in states]
+        actions_rev_l: List[List[A]] = [[] for _ in states]
+        path_costs: List[float] = [0.0 for _ in states]
+
+        num_steps: NDArray[np.int_] = np.array(num_steps_l)
+        num_steps_curr: NDArray[np.int_] = np.zeros(len(states), dtype=int)
+        steps_lt: NDArray[np.bool_] = num_steps_curr < num_steps
+        while np.any(steps_lt):
+            idxs: NDArray[np.int_] = np.where(steps_lt)[0]
+            states_to_move = [states_walk[idx] for idx in idxs]
+
+            states_moved, actions_rev, tcs = self.sample_rev_state(states_to_move)
+
+            idx: int
+            for move_idx, idx in enumerate(idxs):
+                states_walk[idx] = states_moved[move_idx]
+                actions_rev_l[idx].append(actions_rev[move_idx])
+                path_costs[idx] += tcs[move_idx]
+
+            num_steps_curr[idxs] = num_steps_curr[idxs] + 1
+
+            steps_lt[idxs] = num_steps_curr[idxs] < num_steps[idxs]
+
+        return states_walk, actions_rev_l, path_costs
+
+    def samp_nodes_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[float]]:
+        states_goal, goals = self.sample_goalstate_goal_pairs(len(steps_gen))
+        states_start, _, path_costs = self.random_walk_rev(states_goal, steps_gen)
+
+        return states_start, goals, path_costs
+
+    def samp_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        return self._get_edges_and_labels(steps_gen)
+
+    def samp_edges(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A]]:
+        states, goals, actions, _ = self._get_edges_and_labels(steps_gen)
+        return states, goals, actions
+
+    def _get_edges_and_labels(self, steps_gen: List[int]) -> Tuple[List[S], List[G], List[A], List[float]]:
+        # samp_goal_state_goal
+        states_goal, goals = self.sample_goalstate_goal_pairs(len(steps_gen))
+
+        # random walk rev
+        steps_gen_min_1: List[int] = np.maximum(np.array(steps_gen) - 1, 0).tolist()
+        states_start_1step, _, path_costs = self.random_walk_rev(states_goal, steps_gen_min_1)
+
+        # first step
+        states_start, actions_init, tcs_step1 = self.sample_rev_state(states_start_1step)
+
+        # account for step_gen == 0
+        for idx in np.where(np.array(steps_gen) == 0)[0]:
+            states_start[idx] = states_start_1step[idx]
+            tcs_step1[idx] = 0.0
+
+        path_costs = (np.array(tcs_step1) + np.array(path_costs)).tolist()
+
+        return states_start, goals, actions_init, path_costs
 
 
 # numpy convenience mixins
@@ -444,8 +593,9 @@ class NextStateNP(Domain[S, A, G]):
 
         return states_next, tcs
 
-    def random_walk(self, states: List[S], num_steps_l: List[int]) -> Tuple[List[S], List[float]]:
-        states_np = self._states_to_np(states)
+    def random_walk(self, states: List[S], num_steps_l: List[int]) -> Tuple[List[S], List[List[A]], List[float]]:
+        states_np: List[NDArray] = self._states_to_np(states)
+        actions_l: List[List[A]] = [[] for _ in states]
         path_costs: List[float] = [0.0 for _ in states]
 
         num_steps: NDArray[np.int_] = np.array(num_steps_l)
@@ -460,15 +610,17 @@ class NextStateNP(Domain[S, A, G]):
 
             for l_idx in range(len(states_np)):
                 states_np[l_idx][idxs] = states_moved[l_idx]
+
             idx: int
             for act_idx, idx in enumerate(idxs):
+                actions_l[idx].append(actions_rand[act_idx])
                 path_costs[idx] += tcs[act_idx]
 
             num_steps_curr[idxs] = num_steps_curr[idxs] + 1
 
             steps_lt[idxs] = num_steps_curr[idxs] < num_steps[idxs]
 
-        return self._np_to_states(states_np), path_costs
+        return self._np_to_states(states_np), actions_l, path_costs
 
     @abstractmethod
     def _states_to_np(self, states: List[S]) -> List[NDArray]:

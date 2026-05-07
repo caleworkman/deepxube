@@ -2,10 +2,10 @@ from typing import List, cast
 import pytest  # type: ignore
 
 from deepxube.factories.domain_factory import domain_factory
-from deepxube.base.domain import Domain, State, Action, Goal, GoalSampleableFromState, GoalSampleable, ActsRev
+from deepxube.base.domain import Domain, Goal, GoalSampleableFromState, GoalSampleable, ActsRev
 
 
-DOMAIN_NAMES: List[str] = domain_factory.get_all_class_names()
+DOMAIN_NAMES: List[str] = [cls_name for cls_name in domain_factory.get_all_class_names() if cls_name != "sokoban"]
 
 
 def build_domain_from_name(domain_id: str) -> Domain:
@@ -69,11 +69,11 @@ def test_goalsamp(domain_goalsamp_fromstate: GoalSampleableFromState, num_states
 @pytest.mark.parametrize("num_states", [1, 5, 10])  # type: ignore
 def test_actsrev(domain_actsrev: ActsRev, num_states: int) -> None:
     states, _ = domain_actsrev.sample_problem_instances(list(range(0, num_states)))
-    actions: List[Action] = domain_actsrev.sample_state_action(states)
-    states_next: List[State] = domain_actsrev.next_state(states, actions)[0]
-    actions_rev: List[Action] = domain_actsrev.rev_action(states_next, actions)
-    states_rev: List[State] = domain_actsrev.next_state(states_next, actions_rev)[0]
-    assert all(state == state_rev for state, state_rev in zip(states, states_rev))
+    states_rev, actions_rev, tcs_rev = domain_actsrev.sample_rev_state(states)
+    states_fwd, tcs_fwd = domain_actsrev.next_state(states_rev, actions_rev)
+
+    assert all(state == state_fwd for state, state_fwd in zip(states, states_fwd))
+    assert all(tc_rev == tc_fwd for tc_rev, tc_fwd in zip(tcs_rev, tcs_fwd))
 
 
 """

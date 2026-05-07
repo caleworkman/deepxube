@@ -2,7 +2,7 @@ from typing import List, Tuple
 
 from deepxube.base.heuristic import HeurNNet
 from deepxube.base.updater import UpdateHeur
-from deepxube.base.trainer import Train
+from deepxube.base.trainer import Train, update_optimizer
 from deepxube.utils.timing_utils import Times
 from deepxube.trainers.utils.train_utils import train_heur_nnet_step, ctgs_summary
 
@@ -25,8 +25,9 @@ class TrainHeur(Train[HeurNNet, UpdateHeur]):
         ctgs_batch_np = np.expand_dims(ctgs_batch_np.astype(np.float32), 1)
 
         self.nnet.train()
-        ctgs_batch_nnet, loss = train_heur_nnet_step(self.nnet, inputs_batch_np, ctgs_batch_np, self.optimizer, nn.MSELoss(), self.device, self.status.itr,
-                                                     self.train_args, self.train_start_time)
+        update_optimizer(self.optimizer, self.nnet, self.status.itr)
+        ctgs_batch_nnet, loss = train_heur_nnet_step(self.nnet, inputs_batch_np, ctgs_batch_np, self.optimizer, nn.MSELoss(), self.device,
+                                                     self.status.itr, self.train_args, self.train_start_time)
         self.writer.add_scalar("train/loss", loss, self.status.itr)
 
         if first_itr_in_update:

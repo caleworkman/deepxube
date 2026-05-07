@@ -3,12 +3,13 @@ import argparse
 from argparse import ArgumentParser
 
 from deepxube.base.domain import Domain, State, Action, Goal
-from deepxube.base.heuristic import HeurNNetPar, PolicyNNetPar, HeurFn, HeurFnV, HeurFnQ, PolicyFn, policy_fn_rand
+from deepxube.base.heuristic import HeurNNetPar, PolicyNNetPar, HeurFn, HeurFnV, HeurFnQ, PolicyFn
 from deepxube.base.pathfinding import Node, Instance, PathFind, get_path
 from deepxube.factories.pathfinding_factory import get_pathfind_functions
+from deepxube.pathfinding.beam_search import BeamSearch
 from deepxube.utils.command_line_utils import (get_domain_from_arg, get_pathfind_name_kwargs, get_pathfind_from_arg, get_heur_nnet_par_from_arg,
                                                get_policy_nnet_par_from_arg)
-from deepxube.utils import data_utils
+from deepxube.utils import data_utils, misc_utils
 from deepxube.nnet import nnet_utils
 from deepxube.pathfinding.utils.performance import is_valid_soln
 import numpy as np
@@ -18,6 +19,26 @@ import pickle
 import os
 import time
 import sys
+
+
+def policy_fn_rand(domain: Domain, states: List[State], num_rand: int) -> Tuple[List[List[Action]], List[List[float]]]:
+    if num_rand == 0:
+        return [[] for _ in states], [[] for _ in states]
+
+    states_rep: List[List[State]] = []
+    for state in states:
+        states_rep.append([state] * num_rand)
+
+    states_rep_flat, split_idxs = misc_utils.flatten(states_rep)
+
+    actions_samp_flat: List[Action] = domain.sample_state_action(states_rep_flat)
+    actions_samp_l: List[List[Action]] = misc_utils.unflatten(actions_samp_flat, split_idxs)
+
+    probs_l: List[List[float]] = []
+    for actions_samp_i in actions_samp_l:
+        probs_l.append([1.0 / len(actions_samp_i)] * len(actions_samp_i))
+
+    return actions_samp_l, probs_l
 
 
 def parse_solve(parser: ArgumentParser) -> None:
@@ -34,15 +55,15 @@ def parse_solve(parser: ArgumentParser) -> None:
                                                                  "with equal probability is used.")
     parser.add_argument('--policy_file', type=str, default=None, help="File that has policy nnet. Can be None if using random policy.")
     parser.add_argument('--policy_samp', type=int, default=10, help="Number of actions to sample.")
-    parser.add_argument('--policy_rand', type=int, default=0, help="Number of random actions to sample.")
 
     parser.add_argument('--pathfind', type=str, required=True, help="Pathfinding algorithm and arguments.")
     parser.add_argument('--file', type=str, required=True, help="File containing problem instances to solve")
 
     parser.add_argument('--time_limit', type=float, default=-1.0, help="A time limit for search. Default is -1, which means infinite.")
+    parser.add_argument('--max_itrs', type=int, default=None, help="Maximum number of search iterations. None for infinite.")
 
     parser.add_argument('--results', type=str, required=True, help="Directory to save results. Saves results after every instance.")
-    parser.add_argument('--start_idx', type=int, default=0, help="Index of instance at which to start. Useful for debugging.")
+    parser.add_argument('--start_idx', type=int, default=None, help="Index of instance at which to start. Useful for debugging.")
     parser.add_argument('--nnet_batch_size', type=int, default=None, help="Maximum number of inputs to give to any nnet at a time during search. "
                                                                           "Lower if running out of memory. None means no limit.")
 
@@ -89,12 +110,12 @@ def get_heur_fn(domain: Domain, domain_name: str, heur_nnet_str: Optional[str], 
     return heur_fn
 
 
-def get_policy_fn(domain: Domain, domain_name: str, policy_nnet_str: Optional[str], policy_file: Optional[str], policy_samp: int, policy_rand: int,
+def get_policy_fn(domain: Domain, domain_name: str, policy_nnet_str: Optional[str], policy_file: Optional[str], policy_samp: int,
                   nnet_batch_size: Optional[int]) -> Optional[PolicyFn]:
     policy_fn: Optional[PolicyFn]
     if policy_nnet_str is not None:
         assert policy_file is not None
-        policy_nnet_par: PolicyNNetPar = get_policy_nnet_par_from_arg(domain, domain_name, policy_nnet_str, policy_samp, policy_rand)[0]
+        policy_nnet_par: PolicyNNetPar = get_policy_nnet_par_from_arg(domain, domain_name, policy_nnet_str, policy_samp)[0]
         device, devices, on_gpu = nnet_utils.get_device()
         print("device: %s, devices: %s, on_gpu: %s" % (device, devices, on_gpu))
         nnet: nn.Module = nnet_utils.load_nnet(policy_file, policy_nnet_par.get_nnet())
@@ -104,8 +125,8 @@ def get_policy_fn(domain: Domain, domain_name: str, policy_nnet_str: Optional[st
         policy_fn = policy_nnet_par.get_nnet_fn(nnet, nnet_batch_size, device, None)
     else:
         class PolicyFnRand(PolicyFn):
-            def __call__(self, domain_in: Domain, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
-                return policy_fn_rand(domain, states, policy_samp + policy_rand)
+            def __call__(self, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
+                return policy_fn_rand(domain, states, policy_samp)
 
         policy_fn = PolicyFnRand()
 
@@ -121,7 +142,7 @@ def solve_cli(args: argparse.Namespace) -> None:
 
     # heur and policy fn
     heur_fn: Optional[HeurFn] = get_heur_fn(domain, domain_name, args.heur, args.heur_file, args.heur_type, args.nnet_batch_size)
-    policy_fn: Optional[PolicyFn] = get_policy_fn(domain, domain_name, args.policy, args.policy_file, args.policy_samp, args.policy_rand, args.nnet_batch_size)
+    policy_fn: Optional[PolicyFn] = get_policy_fn(domain, domain_name, args.policy, args.policy_file, args.policy_samp, args.nnet_batch_size)
     print(domain)
     pathfind_functions: Any = get_pathfind_functions(get_pathfind_name_kwargs(args.pathfind)[0], heur_fn, policy_fn)
     pathfind: PathFind = get_pathfind_from_arg(domain, pathfind_functions, args.pathfind)[0]
@@ -150,7 +171,11 @@ def solve_cli(args: argparse.Namespace) -> None:
         if not args.debug:
             sys.stdout = data_utils.Logger(output_file, "w")
 
-    start_idx = len(results["actions"])
+    start_idx: int
+    if args.start_idx is not None:
+        start_idx = args.start_idx
+    else:
+        start_idx = len(results["actions"])
     for state_idx in range(start_idx, len(states)):
         # get problem instance
         state: State = states[state_idx]
@@ -169,6 +194,8 @@ def solve_cli(args: argparse.Namespace) -> None:
             num_itrs += 1
             if (args.time_limit >= 0) and ((time.time() - start_time) > args.time_limit):
                 break
+            if (args.max_itrs is not None) and (num_itrs == args.max_itrs):
+                break
         solve_time = time.time() - start_time
 
         # record results
@@ -179,10 +206,25 @@ def solve_cli(args: argparse.Namespace) -> None:
         itrs_per_sec: float = num_itrs / solve_time
         num_nodes_gen_idx: int = pathfind.instances[0].num_nodes_generated
         goal_node: Optional[Node] = pathfind.instances[0].goal_node
+
+        is_rollout: bool = isinstance(pathfind, BeamSearch) and pathfind.rollout  # special case
         if goal_node is not None:
-            path_states, path_actions, path_cost = get_path(goal_node)
-            assert is_valid_soln(state, goal, path_actions, domain)
-            solved = True
+            path_states, path_actions, tcs, path_cost = get_path(goal_node)
+            if is_rollout:
+                # see if any state on path is solved, if so, modify path to end at solved state
+                is_sovled_path: List[bool] = domain.is_solved(path_states, [goal] * len(path_states))
+                if any(is_sovled_path):
+                    solved = True
+                    solved_idx: int = is_sovled_path.index(True)
+                    path_states = path_states[:(solved_idx + 1)]
+                    path_actions = path_actions[:solved_idx]
+                    tcs = tcs[:solved_idx]
+                    path_cost = sum(tcs)
+            else:
+                solved = True
+
+            if solved:
+                assert is_valid_soln(state, goal, path_actions, domain)
 
         results["actions"].append(path_actions)
         results["states_on_path"].append(path_states)

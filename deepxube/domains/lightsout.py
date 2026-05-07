@@ -82,8 +82,11 @@ class LightsOut(NextStateNPActsEnumFixed[LOState, LOAction, LOGoal], GoalStartRe
 
         return states_goal, goals
 
-    def rev_action(self, states: List[LOState], actions: List[LOAction]) -> List[LOAction]:
-        return actions
+    def sample_rev_state(self, states: List[LOState]) -> Tuple[List[LOState], List[LOAction], List[float]]:
+        actions: List[LOAction] = self.sample_state_action(states)
+        states_rev: List[LOState] = self.next_state(states, actions)[0]
+
+        return states_rev, actions, [1.0] * len(states)
 
     def get_input_info_flat_sg(self) -> Tuple[List[int], List[int]]:
         return [self.num_tiles], [1]

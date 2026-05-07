@@ -4,13 +4,15 @@ from typing import List, Any, TypeVar, Generic, cast, Tuple, Optional, Type, Pro
 import numpy as np
 from numpy.typing import NDArray
 
-from deepxube.base.domain import Domain, State, Goal, Action
-from deepxube.base.nnet_input import NNetInput
+from deepxube.base.domain import State, Goal, Action
+from deepxube.base.nnet_input import NNetInput, PolicyNNetIn
 from deepxube.nnet.nnet_utils import NNetParInfo, nnet_batched, NNetPar, get_nnet_par_out
 from deepxube.utils import misc_utils
+
 import torch
 from torch import nn, Tensor
-import random
+import torch.optim as optim
+from torch.optim.optimizer import Optimizer
 
 
 In = TypeVar('In', bound=NNetInput)
@@ -26,10 +28,20 @@ class DeepXubeNNet(nn.Module, Generic[In], ABC):
         super().__init__()
         assert isinstance(nnet_input, self.nnet_input_type()), f"NNetInput {nnet_input} must be an instance of {self.nnet_input_type()}."
         self.nnet_input: In = nnet_input
+        self.lr: float = 0.001
+        self.lr_d: float = 0.9999993
 
     @abstractmethod
     def forward(self, inputs: List[Tensor]) -> List[Tensor]:
         pass
+
+    def get_optimizer(self) -> Optimizer:
+        return optim.Adam(self.parameters(), lr=0.001)
+
+    def update_optimizer(self, optimizer: Optimizer, train_itr: int) -> None:
+        lr_itr: float = self.lr * (self.lr_d ** train_itr)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr_itr
 
 
 # neural networks
@@ -53,62 +65,118 @@ class HeurNNet(DeepXubeNNet[In]):
         pass
 
 
-class PolicyNNet(DeepXubeNNet[In], ABC):
-    def __init__(self, nnet_input: In, **kwargs: Any):
+PNNetIn = TypeVar('PNNetIn', bound=PolicyNNetIn)
+
+
+class PolicyNNet(DeepXubeNNet[PNNetIn], ABC):
+    def __init__(self, nnet_input: PNNetIn, num_samp: int, **kwargs: Any):
         super().__init__(nnet_input)
+        self.num_samp: int = num_samp
+
+    def forward(self, inputs: List[Tensor]) -> List[Tensor]:
+        if self.training:
+            return [self._forward_train(inputs)]
+        else:
+            return self._forward_eval(inputs)
+
+    @abstractmethod
+    def _forward_eval(self, states_goals: List[Tensor]) -> List[Tensor]:
+        """ Condition on states and goals to sample self.num_samp actions
+
+        :param states_goals:
+        :return: List of tensors representing actions with the last Tensor representing the probability density of actions (N x num_samp x ...)
+        """
+        pass
+
+    @abstractmethod
+    def _forward_train(self, states_goals_actions: List[Tensor]) -> Tensor:
+        """
+
+        :param states_goals_actions:
+        :return: loss  IMPORTANT: do not perform reduction as main process will take mean so that DataParallel can be used.
+        I.e. dimensionality of loss should be (N,) where N is the batch size
+        """
+        pass
+
+
+def _flatten_list(data_l: List[Tensor]) -> Tensor:
+    return torch.cat([torch.flatten(data_i) for data_i in data_l])
+
+
+class PolicyVAE(PolicyNNet[PNNetIn]):
+    def __init__(self, nnet_input: PNNetIn, num_samp: int, kl_weight: float, **kwargs: Any):
+        super().__init__(nnet_input, num_samp)
         self.norm_dist = torch.distributions.Normal(0, 1)
-        self.criterion_recon = nn.MSELoss()
+        self.kl_weight: float = kl_weight
 
-    def forward(self, states_goals: List[Tensor]) -> List[Tensor]:
-        """ Condition on states and goals to sample actions
+    def _forward_eval(self, states_goals: List[Tensor]) -> List[Tensor]:
+        recons_l: List[List[Tensor]] = []
+        z_l: List[Tensor] = []
+        for _ in range(self.num_samp):
+            z: Tensor = self.norm_dist.sample((states_goals[0].shape[0],) + self.latent_shape()).to(states_goals[0].device)
+            recons: List[Tensor] = self.decode(states_goals, z)
+            recons_l.append(recons)
+            z_l.append(z)
 
-        :param states_goals:
-        :return:
-        """
-        z: Tensor = self.norm_dist.sample((states_goals[0].shape[0],) + self.latent_shape()).to(states_goals[0].device)
-        recons: Tensor = self.decode(states_goals, z)
-        return [recons, self.norm_dist.log_prob(z).sum(dim=1, keepdim=True)]
+        recons_all: List[Tensor] = []
+        for recon_idx in range(len(recons_l[0])):
+            recons_i: Tensor = torch.stack([recons_i[recon_idx] for recons_i in recons_l], dim=1)
+            recons_all.append(recons_i)
 
-    def autoencode(self, states_goals: List[Tensor], actions: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
-        """
+        z_all: Tensor = torch.stack(z_l, dim=1)
+        return recons_all + [self.norm_dist.log_prob(z_all).sum(dim=2)]
 
-        :param states_goals:
-        :param actions:
-        :return: reconstruction loss, kl loss
-        """
+    def _forward_train(self, states_goals_actions: List[Tensor]) -> Tensor:
+        split_idx: int = self.nnet_input.states_goals_actions_split_idx()
+        states_goals: List[Tensor] = states_goals_actions[:split_idx]
+        actions: List[Tensor] = states_goals_actions[split_idx:]
+
         actions_proc, mu, logvar = self.encode(states_goals, actions)
         sum_dims: Tuple[int, ...] = tuple(range(1, len(mu.shape)))
-        loss_kl: Tensor = torch.mean(-0.5 * torch.sum(1 + logvar - mu ** 2 - logvar.exp(), dim=sum_dims), dim=0)
+        loss_kl: Tensor = -0.5 * torch.sum(1 + logvar - mu ** 2 - logvar.exp(), dim=sum_dims)
 
         sigma = torch.exp(logvar / 2.0)
         z = mu + sigma * self.norm_dist.sample(mu.shape).to(mu.device)
-        actions_recon: Tensor = self.decode(states_goals, z)
+        actions_recon: List[Tensor] = self.decode(states_goals, z)
 
-        loss_recon: Tensor = self.criterion_recon(actions_recon, actions_proc)
+        loss_recon: Tensor = self._compute_recon_loss(actions_proc, actions_recon)
+        loss: Tensor = loss_recon + (self.kl_weight * loss_kl)
 
-        return loss_recon, loss_kl, actions_recon
+        # print_str: str = f"loss_recon: {loss_recon.item():.2E}, loss_kl: {loss_kl.item():.2E}"
+        return loss
 
     @abstractmethod
     def latent_shape(self) -> Tuple[int, ...]:
         pass
 
     @abstractmethod
-    def encode(self, states_goals: List[Tensor], actions: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    def encode(self, states_goals: List[Tensor], actions: List[Tensor]) -> Tuple[List[Tensor], Tensor, Tensor]:
         """ Conditon on states and goals and map actions to mu and logvar
 
         :param states_goals:
         :param actions:
-        :return: processed actions, mu, and logvar
+        :return: processed input actions, mu, and logvar
         """
 
     @abstractmethod
-    def decode(self, states_goals: List[Tensor], z: Tensor) -> Tensor:
+    def decode(self, states_goals: List[Tensor], z: Tensor) -> List[Tensor]:
         """ Conditon on states and goals and map sampled latent to reconstructed actions
 
         :param states_goals:
-        :param z:
+        :param z: Latent state
         :return:
         """
+
+    def _compute_recon_loss(self, action_proc: List[Tensor], actions_recon: List[Tensor]) -> Tensor:
+        loss_recons: List[Tensor] = []
+        for actions_proc_i, actions_recon_i in zip(action_proc, actions_recon):
+            loss_recon_i: Tensor = torch.mean((actions_recon_i - actions_proc_i) ** 2, dim=1)
+            loss_recons.append(loss_recon_i)
+
+        return torch.stack(loss_recons, dim=0).mean(dim=0)
+
+    def __repr__(self) -> str:
+        return f"{super().__repr__()}\nKL Weight: {self.kl_weight}"
 
 
 # functions
@@ -130,7 +198,7 @@ HeurFn = Union[HeurFnV, HeurFnQ]
 
 @runtime_checkable
 class PolicyFn(Protocol):
-    def __call__(self, domain: Domain, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
+    def __call__(self, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
         """ Map states and goals to sampled actions along with their probability (or log probability) densities
 
         """
@@ -307,75 +375,24 @@ class HeurNNetParQIn(HeurNNetParQ, ABC):
         return q_vals_l
 
 
-def policy_fn_rand(domain: Domain, states: List[State], num_rand: int) -> Tuple[List[List[Action]], List[List[float]]]:
-    if num_rand == 0:
-        return [[] for _ in states], [[] for _ in states]
-
-    states_rep: List[List[State]] = []
-    for state in states:
-        states_rep.append([state] * num_rand)
-
-    states_rep_flat, split_idxs = misc_utils.flatten(states_rep)
-
-    actions_samp_flat: List[Action] = domain.sample_state_action(states_rep_flat)
-    actions_samp_l: List[List[Action]] = misc_utils.unflatten(actions_samp_flat, split_idxs)
-
-    probs_l: List[List[float]] = []
-    for actions_samp_i in actions_samp_l:
-        probs_l.append([1.0 / len(actions_samp_i)] * len(actions_samp_i))
-
-    return actions_samp_l, probs_l
-
-
-def _combine_nnet_with_rand(domain: Domain, actions_l: List[List[Action]], pdfs_l: List[List[float]], states: List[State],
-                            num_rand: int) -> Tuple[List[List[Action]], List[List[float]]]:
-    actions_rand_l: List[List[Action]] = policy_fn_rand(domain, states, num_rand)[0]
-
-    actions_comb_l: List[List[Action]] = []
-    pdfs_comb_l: List[List[float]] = []
-    # get nnet actions
-    for state_idx in range(len(states)):
-        actions_rand_i: List[Action] = actions_rand_l[state_idx]
-        actions_comb_l.append(actions_l[state_idx] + actions_rand_i)
-        pdfs_i: List[float] = pdfs_l[state_idx]
-        pdfs_comb_l.append(pdfs_i + random.choices(pdfs_i, k=len(actions_rand_i)))
-
-    return actions_comb_l, pdfs_comb_l
-
-
 class PolicyNNetPar(NNetPar[PolicyFn]):
-    def __init__(self, num_samp: int, num_rand: int):
-        self.num_samp: int = num_samp
-        self.num_rand: int = num_rand
-
     def get_nnet_fn(self, nnet: nn.Module, batch_size: Optional[int], device: torch.device, update_num: Optional[int]) -> PolicyFn:
         nnet.eval()
-        if (update_num is not None) and (update_num == 0):
-            def policy_fn(domain: Domain, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
-                assert len(states) == len(goals)  # to stop PyCharm from complaining
-                return policy_fn_rand(domain, states, self.num_samp + self.num_rand)
-        else:
-            def policy_fn(domain: Domain, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
-                inputs_nnet_rep: List[NDArray] = self._get_nnet_inputs_rep(states, goals, self.num_samp)
-                nnet_out_np: List[NDArray[np.float64]] = nnet_batched(nnet, inputs_nnet_rep, batch_size, device)
 
-                actions_l, pdfs_l = self._np_to_acts_and_pdfs(nnet_out_np[0], nnet_out_np[1], len(states), self.num_samp)
-                return _combine_nnet_with_rand(domain, actions_l, pdfs_l, states, self.num_rand)
+        def policy_fn(states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
+            inputs_nnet: List[NDArray] = self.to_np_fn(states, goals)
+            nnet_out_np: List[NDArray[np.float64]] = nnet_batched(nnet, inputs_nnet, batch_size, device)
+
+            return self._np_to_acts_and_pdfs(nnet_out_np[0:-1], nnet_out_np[-1], len(states))
 
         return policy_fn
 
     def get_nnet_par_fn(self, nnet_par_info: NNetParInfo, update_num: Optional[int]) -> PolicyFn:
-        if (update_num is not None) and (update_num == 0):
-            def policy_fn(domain: Domain, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
-                assert len(states) == len(goals)  # to stop PyCharm from complaining
-                return policy_fn_rand(domain, states, self.num_samp + self.num_rand)
-        else:
-            def policy_fn(domain: Domain, states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
-                inputs_nnet_rep: List[NDArray] = self._get_nnet_inputs_rep(states, goals, self.num_samp)
-                nnet_out_np: List[NDArray[np.float64]] = get_nnet_par_out(inputs_nnet_rep, nnet_par_info)
+        def policy_fn(states: List[State], goals: List[Goal]) -> Tuple[List[List[Action]], List[List[float]]]:
+            inputs_nnet: List[NDArray] = self.to_np_fn(states, goals)
+            nnet_out_np: List[NDArray[np.float64]] = get_nnet_par_out(inputs_nnet, nnet_par_info)
 
-                actions_l, pdfs_l = self._np_to_acts_and_pdfs(nnet_out_np[0], nnet_out_np[1], len(states), self.num_samp)
-                return _combine_nnet_with_rand(domain, actions_l, pdfs_l, states, self.num_rand)
+            return self._np_to_acts_and_pdfs(nnet_out_np[0:-1], nnet_out_np[-1], len(states))
 
         return policy_fn
 
@@ -392,28 +409,25 @@ class PolicyNNetPar(NNetPar[PolicyFn]):
         pass
 
     @abstractmethod
-    def _nnet_out_to_actions(self, nnet_out: NDArray[np.float64]) -> List[Action]:
+    def _nnet_out_to_actions(self, nnet_out: List[NDArray[np.float64]]) -> List[Action]:
         pass
 
-    def _get_nnet_inputs_rep(self, states: List[State], goals: List[Goal], num_samp: int) -> List[NDArray]:
-        inputs_nnet: List[NDArray] = self.to_np_fn(states, goals)
-        inputs_nnet_rep_interleave: List[NDArray] = []
-        for inputs_nnet_i in inputs_nnet:
-            inputs_nnet_rep_interleave.append(np.repeat(inputs_nnet_i, num_samp, axis=0))
-        return inputs_nnet_rep_interleave
-
-    def _np_to_acts_and_pdfs(self, actions_np: NDArray[np.float64], pdfs_np: NDArray[np.float64], num_states: int,
-                             num_samp: int) -> Tuple[List[List[Action]], List[List[float]]]:
+    def _np_to_acts_and_pdfs(self, actions_np: List[NDArray[np.float64]], pdfs_np: NDArray[np.float64],
+                             num_states: int) -> Tuple[List[List[Action]], List[List[float]]]:
+        # assert dimensions match
         assert len(pdfs_np.shape) == 2
-        assert pdfs_np.shape[1] == 1
+        assert pdfs_np.shape[0] == num_states
+        for actions_np_i in actions_np:
+            assert actions_np_i.shape[0] == num_states
+            assert actions_np_i.shape[0] == pdfs_np.shape[0]
+            assert actions_np_i.shape[1] == pdfs_np.shape[1]
 
+        # convert to action object rep
         actions_l: List[List[Action]] = []
         pdfs_l: List[List[float]] = []
         for state_idx in range(num_states):
-            start_idx: int = state_idx * num_samp
-            end_idx: int = start_idx + num_samp
-            actions_np_state: NDArray[np.float64] = actions_np[start_idx:end_idx]
-            pdfs_state: List[float] = pdfs_np[start_idx:end_idx, 0].tolist()
+            actions_np_state: List[NDArray[np.float64]] = [actions_np_i[state_idx] for actions_np_i in actions_np]
+            pdfs_state: List[float] = pdfs_np[state_idx, :].tolist()
 
             actions_l.append(self._nnet_out_to_actions(actions_np_state))
             pdfs_l.append(pdfs_state)
@@ -421,4 +435,5 @@ class PolicyNNetPar(NNetPar[PolicyFn]):
         return actions_l, pdfs_l
 
     def __repr__(self) -> str:
-        return f"{self.get_nnet()}\n#Samp: {self.num_samp}, #Rand Samp: {self.num_rand}"
+        nnet: PolicyNNet = self.get_nnet()
+        return f"{nnet}\n#Samp: {nnet.num_samp}"

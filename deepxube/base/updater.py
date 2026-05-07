@@ -123,7 +123,7 @@ class Update(Generic[D, FNs, P, Inst], ABC):
         self.targ_update_nums: Dict[str, int] = dict()
         self.nnet_par_dict: Dict[str, NNetPar] = dict()
         self.nnet_file_dict: Dict[str, str] = dict()
-        for nnet_name, nnet_file, nnet_par in domain.get_nnet_pars():
+        for nnet_name, (nnet_file, nnet_par) in domain.get_nnet_par_dict().items():
             self.add_nnet_par(nnet_name, nnet_par)
             self.set_nnet_file(nnet_name, nnet_file)
         self.nnet_par_info_dict: Dict[str, NNetParInfo] = dict()
@@ -283,9 +283,9 @@ class Update(Generic[D, FNs, P, Inst], ABC):
                 step_to_pathperf[step_num_perf] = step_to_pathperf[step_num_perf].comb_perf(pathperf)
 
         # print
+        print(f"Times - {times_up.get_time_str()}")
         if self.up_args.v:
             print(f"Generated {format(self.num_generated, ',')} training instances")
-            print(f"Times - {times_up.get_time_str()}")
             print_pathfindperf(step_to_pathperf)
 
         # clean up clean up everybody do your share
@@ -581,7 +581,7 @@ class UpdateSup(Update[D, Any, PS, Inst], ABC):
         return None
 
     def _make_instances(self, pathfind: PS, steps_gen: List[int], inst_infos: List[Any], times: Times) -> List[Inst]:
-        return pathfind.make_instances_rw(steps_gen, inst_infos)
+        return pathfind.make_instances_sup(steps_gen, inst_infos)
 
     def _step_sync_main(self, pathfind: PS, times: Times) -> List[NDArray]:
         raise NotImplementedError("No sync_main option for supervised update")
