@@ -97,7 +97,7 @@ class SymbolicRegression(
         self.random_walk_length = random_walk_length
 
     def sample_start_states(self, walk_length: int) -> List[SymbolicState]:
-        states, costs = self.random_walk([SymbolicState(x)], [walk_length])
+        states, actions, costs = self.random_walk([SymbolicState(x)], [walk_length])
         return states
 
     def sample_goal_from_state(self, states_start: Optional[list[SymbolicState]], states_goal: list[SymbolicState]) -> list[SymbolicGoal]:
@@ -205,6 +205,9 @@ class SymbolicRegression(
         # can create a figure with the data points, and the function (state) overlaid
         ax = plt.axes()
 
+        print('xs', goal.xs)
+        print('ys', goal.ys)
+
         # The goal
         ax.plot(goal.xs, goal.ys)
         fig.add_axes(ax)
@@ -230,29 +233,22 @@ class SymbolicParser(Parser):
 
 @register_nnet_input("symbolic_regression", "symbolic_regression_nnet_input")
 class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState, SymbolicGoal]):
+
+    # How should this get the Tokenizer?
     def get_input_info(self) -> Any:
         pass
 
     def to_np(self, states: List[SymbolicState], goals: List[SymbolicGoal]) -> List[NDArray]:
-        # Final input something like
-        # [
-        #   [
-        #       [token1_1, token1_2, ..., token_1n],    # fixed length, assume max expression length and mask (pad?) missing
-        #       [token2_1, token2_2, ..., token2_n],
-        #   ],
-        #   [x1, x2, ..., x_n],    # this can probably be one dim because all the points are the same
-        #   [
-        #       [y1_1, y2, ..., y_n],
-        #       [y2_1, y2, ..., y_n],
-        #   ],
-        #   [
-        #       [g1_1, g1_2, ..., g1_n],
-        #       [g2_1, g2_2, ..., g2_n]
-        #   ]
-        # ]
 
         # there are multiple token's, y's, and g's because it expects examples which it can distribute across GPUs, etc
-        pass
+        tokens = [tokenizer.tokenize(str(s.expr)) for s in states]
+        encoded_tokens = [tokenizer.encode(t) for t in tokens]
+
+        return [
+            encoded_tokens,
+            goals[0].xs,
+            [g.ys for g in goals]
+        ]
 
 
 # For NN, may need to implement a different structure than Grid/Cube
