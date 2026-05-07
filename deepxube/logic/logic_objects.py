@@ -40,6 +40,9 @@ class Literal:
     def __repr__(self) -> str:
         return self.__str__()
 
+    def __hash__(self) -> int:
+        return hash(self.to_code())
+
 
 class VarNode:
     def __init__(self) -> None:

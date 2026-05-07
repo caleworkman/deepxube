@@ -25,8 +25,8 @@ cases = (
     + [pytest.param(a, b, c, d, e, f, g, 85.0, id="beam_v") for a, b, c, d, e, f, g in
        product(["beam_v.1T"], ["beam_v"], ["V"], [True, False], [True, False], [1], [True, False])]
 
-    + [pytest.param(a, b, c, d, e, f, g, 85.0, id="sup_v_rw") for a, b, c, d, e, f, g in
-       product(["sup_v_rw"], ["graph_v"], ["V"], [False], [False], [1], [False])]
+    + [pytest.param(a, b, c, d, e, f, g, 85.0, id="sup_v") for a, b, c, d, e, f, g in
+       product(["sup_v"], ["graph_v"], ["V"], [False], [False], [1], [False])]
 
     + [pytest.param(a, b, c, d, e, f, g, 80.0, id="graph_q") for a, b, c, d, e, f, g in
        product(["graph_q"], ["graph_q"], ["QFix", "QIn"], [True, False], [False], [1, -1], [True, False])]
@@ -34,8 +34,8 @@ cases = (
     + [pytest.param(a, b, c, d, e, f, g, 80.0, id="beam_q") for a, b, c, d, e, f, g in
        product(["beam_q.1T"], ["beam_q"], ["QFix", "QIn"], [True, False], [True, False], [1], [True, False])]
 
-    + [pytest.param(a, b, c, d, e, f, g, 80.0, id="sup_q_rw") for a, b, c, d, e, f, g in
-       product(["sup_q_rw"], ["graph_q"], ["QFix", "QIn"], [False], [False], [1], [False])]
+    + [pytest.param(a, b, c, d, e, f, g, 80.0, id="sup_q") for a, b, c, d, e, f, g in
+       product(["sup_q"], ["graph_q"], ["QFix", "QIn"], [False], [False], [1], [False])]
 )
 
 
@@ -57,7 +57,10 @@ def test_train_solve_heur(pathfind_tr_str: str, pathfind_solve_str: str, heur_ty
     updater: UpdateHeur = updater_ret
 
     # train args
-    train_args: TrainArgs = TrainArgs(50, 0.001, 0.9999993, 2000, bal, display=0)
+    rb: int = 0
+    if sync_main:
+        rb = 1
+    train_args: TrainArgs = TrainArgs(50, 2000, bal, rb=rb, display=0)
 
     # train
     save_dir: str = "tests/dummy/"
@@ -99,7 +102,7 @@ def test_train_solve_heur(pathfind_tr_str: str, pathfind_solve_str: str, heur_ty
         # check soln
         goal_node: Optional[Node] = instance.goal_node
         if goal_node is not None:
-            path_states, path_actions, path_cost = get_path(goal_node)
+            path_states, path_actions, _, path_cost = get_path(goal_node)
             assert is_valid_soln(instance.root_node.state, instance.root_node.goal, path_actions, domain)
 
     print(pathfind_perf.to_string())

@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar, List, Dict, Tuple, cast, Optional
+from typing import Generic, TypeVar, List, Dict, Tuple, cast, Optional, Union
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.optimizer import Optimizer
+from torch.nn import DataParallel
+from torch.optim import Optimizer
 
 from deepxube.base.heuristic import DeepXubeNNet
 from deepxube.base.updater import Update
@@ -25,14 +25,13 @@ import pickle
 import os
 import shutil
 import time
+import re
 
 
 @dataclass
 class TrainArgs:
     """
     :param batch_size: Batch size
-    :param lr: Initial learning rate
-    :param lr_d: Learning rate decay for every iteration. Learning rate is decayed according to: lr * (lr_d ^ itr)
     :param max_itrs: Maximum number of iterations
     :param balance_steps: If true, steps are balanced based on solve percentage
     :param rb: amount of data generated from previous updates to keep in replay buffer. Total replay buffer size will
@@ -40,22 +39,21 @@ class TrainArgs:
     :param loss_thresh: Loss threshold for updating.
     :param targ_up_searches: If > 0, do a greedy search with updater for minimum given number of searches to test
     if target network should be updated. Otherwise, it will be updated automatically.
-    :param policy_kl: KL divergence when training policy.
-    :param display: Number of iterations to display progress when training nnet. No display if 0.
     :param skip_heur: Skip training of heuristic function
     :param skip_policy: Skip training of policy
+    :param checkpoint: Save checkpoint file of network being trained at initialization and at every given number of update checks.
+    Checkpoint number given is training iteration, not update number. If 0 then checkpointing is not done.
+    :param display: Number of iterations to display progress when training nnet. No display if 0.
     """
     batch_size: int
-    lr: float
-    lr_d: float
     max_itrs: int
     balance_steps: bool
-    rb: int = 1
+    rb: int = 0
     loss_thresh: float = np.inf
     targ_up_searches: int = 0
-    policy_kl: float = 0.1
     skip_heur: bool = False
     skip_policy: bool = False
+    checkpoint: int = 0
     display: int = 100
 
 
@@ -82,9 +80,7 @@ class DataBuffer:
         assert len(self.arrays) > 0, "Data buffer should have at least one array."
         self._add_circular(arrays_add)
 
-    def sample(self, num: int) -> List[NDArray]:
-        sel_idxs: NDArray = np.random.randint(self.size(), size=num)
-
+    def sample(self, sel_idxs: NDArray) -> List[NDArray]:
         arrays_samp: List[NDArray] = sel_l(self.arrays, sel_idxs)
 
         return arrays_samp
@@ -160,6 +156,13 @@ NNet = TypeVar('NNet', bound=DeepXubeNNet)
 Up = TypeVar('Up', bound=Update)
 
 
+def update_optimizer(optimizer: Optimizer, nnet: Union[DataParallel, DeepXubeNNet], train_itr: int) -> None:
+    if isinstance(nnet, DataParallel):
+        nnet = nnet.module
+    assert isinstance(nnet, DeepXubeNNet)
+    nnet.update_optimizer(optimizer, train_itr)
+
+
 class Train(Generic[NNet, Up], ABC):
     @staticmethod
     @abstractmethod
@@ -204,8 +207,12 @@ class Train(Generic[NNet, Up], ABC):
             self.nnet = cast(NNet, nnet_utils.load_nnet(self.nnet_file, self.nnet))
         else:
             torch.save(self.nnet.state_dict(), self.nnet_file)
+            if (self.train_args.checkpoint > 0) and (self.status.update_num == 0):
+                self._save_checkpoint()
+
         if not os.path.isfile(self.nnet_targ_file):
             torch.save(self.nnet.state_dict(), self.nnet_targ_file)
+        self.optimizer: Optimizer = self.nnet.get_optimizer()
 
         self.nnet.to(self.device)
         if self.data_parallel():
@@ -218,7 +225,6 @@ class Train(Generic[NNet, Up], ABC):
         self.db: DataBuffer = DataBuffer(self.train_args.batch_size * self.updater.up_args.get_up_gen_itrs(), db_shapes, db_dtypes)
 
         # optimizer and criterion
-        self.optimizer: Optimizer = optim.Adam(self.nnet.parameters(), lr=self.train_args.lr)
         self.train_start_time = time.time()
 
     def update_step(self) -> None:
@@ -254,6 +260,8 @@ class Train(Generic[NNet, Up], ABC):
         # save nnet
         start_time = time.time()
         torch.save(self.nnet.state_dict(), self.nnet_file)
+        if (self.train_args.checkpoint > 0) and (self.status.update_num % self.train_args.checkpoint == 0):
+            self._save_checkpoint()
         times.record_time("save_net", time.time() - start_time)
 
         # update nnet
@@ -286,16 +294,27 @@ class Train(Generic[NNet, Up], ABC):
     def _train(self, times: Times) -> float:
         loss: float = np.inf
         first_itr_in_update: bool = True
+        sel_idx_start: int = 0
+        sel_idxs_rand_order: NDArray = np.random.choice(self.db.size(), size=self.db.size(), replace=False)
         for _ in range(self.updater.up_args.up_itrs):
             # sample data
             start_time = time.time()
-            batch: List[NDArray] = self.db.sample(self.train_args.batch_size)
+            sel_idxs: NDArray = np.arange(sel_idx_start, sel_idx_start + self.train_args.batch_size) % self.db.size()
+
+            batch: List[NDArray] = self.db.sample(sel_idxs_rand_order[sel_idxs])
             times.record_time("data_samp", time.time() - start_time)
 
             # train
             loss = self._train_itr(batch, first_itr_in_update, times)
             first_itr_in_update = False
             self.status.itr += 1
+
+            # update sel_idx
+            if sel_idxs.max() == (self.db.size() - 1):
+                sel_idx_start = 0
+                sel_idxs_rand_order = np.random.choice(self.db.size(), size=self.db.size(), replace=False)
+            else:
+                sel_idx_start = int(sel_idxs[-1]) + 1
 
         return loss
 
@@ -304,15 +323,16 @@ class Train(Generic[NNet, Up], ABC):
         update_train_itr: int = 0
         first_itr_in_update: bool = True
         while update_train_itr < self.updater.up_args.up_itrs:
-            batch: List[NDArray]
             # data from updater should not be more that train_args.batch_size
             start_time = time.time()
+            sel_idxs: NDArray
             if self.db.size() == num_gen:
-                batch = self.db.sample(self.train_args.batch_size)
+                sel_idxs = np.random.randint(self.db.size(), size=self.train_args.batch_size)
             else:
+                # compute heuristic values for ongoing search and get data
                 self.nnet.eval()
                 while self.db.size() < ((update_train_itr + 1) * self.train_args.batch_size):
-                    # get heuristic values for ongoing search
+                    # compute heuristic values
                     q_res: Optional[Tuple[int, List[SharedNDArray]]] = get_nowait_noerr(self.to_main_q)
                     if q_res is not None:
                         proc_id, inputs_np_shm = q_res
@@ -323,9 +343,11 @@ class Train(Generic[NNet, Up], ABC):
                     data_l_i: List[List[NDArray]] = self.updater.get_update_data(nowait=True)
                     for data in data_l_i:
                         self.db.add(data)
-                sel_idxs: NDArray = np.arange(update_train_itr * self.train_args.batch_size,
-                                              (update_train_itr + 1) * self.train_args.batch_size)
-                batch = sel_l(self.db.arrays, sel_idxs)
+
+                # select incides
+                sel_idxs = np.arange(update_train_itr * self.train_args.batch_size, (update_train_itr + 1) * self.train_args.batch_size)
+
+            batch: List[NDArray] = self.db.sample(sel_idxs)
 
             times.record_time("up_data", time.time() - start_time)
 
@@ -360,6 +382,11 @@ class Train(Generic[NNet, Up], ABC):
         print(f"Data - {', '.join(post_up_info_l)}")
 
         times.record_time("up_end", time.time() - start_time)
+
+    def _save_checkpoint(self) -> None:
+        assert re.compile(".*.pt$").match(self.nnet_file) is not None, "nnet file should end in '.pt'"
+        nnet_file_chkpt: str = re.sub(".pt$", f"_chkpt_{self.status.itr}.pt", self.nnet_file)
+        torch.save(self.nnet.state_dict(), nnet_file_chkpt)
 
     @abstractmethod
     def _add_post_up_info(self) -> List[str]:

@@ -1,17 +1,19 @@
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, cast
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 from torch.multiprocessing import Queue, get_context
 
 from deepxube.base.domain import Domain, ActsEnum, StartGoalWalkable, State, Goal, Action
 from deepxube.nnet.nnet_utils import NNetPar
-from deepxube.base.heuristic import HeurNNetPar, PolicyNNetPar, PolicyFn, HeurNNetParV, HeurNNetParQ
+from deepxube.base.heuristic import HeurNNetPar, PolicyNNet, PolicyNNetPar, PolicyFn, HeurNNetParV, HeurNNetParQ
 from deepxube.nnet.nnet_utils import NNetCallable
 from deepxube.nnet import nnet_utils
 from deepxube.utils.misc_utils import flatten
 from deepxube.utils.timing_utils import Times
 import numpy as np
+from numpy.typing import NDArray
 
 import time
 
@@ -24,11 +26,11 @@ def data_runner(queue1: Queue, queue2: Queue) -> None:
         queue2.put(the)
 
 
-def test_env(env: Domain, num_states: int, step_max: int) -> Tuple[List[State], List[Goal], List[Action]]:
+def test_env(env: Domain, num_states: int, step_min: int, step_max: int) -> Tuple[List[State], List[Goal], List[Action]]:
     # get data
     start_time = time.time()
     sg_times: Times = Times()
-    states, goals = env.sample_problem_instances(list(np.random.randint(step_max + 1, size=num_states)), times=sg_times)
+    states, goals = env.sample_problem_instances(list(np.random.randint(step_min, step_max + 1, size=num_states)), times=sg_times)
     assert len(states) == len(goals), f"state({len(states)}) and goal({len(goals)}) pairs not same length"
 
     elapsed_time = time.time() - start_time
@@ -132,6 +134,9 @@ def init_nnet(nnet_par: NNetPar) -> Tuple[nn.Module, torch.device]:
     if on_gpu:
         nnet = nn.DataParallel(nnet)
 
+    num_trainable = sum(p.numel() for p in nnet.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters: {format(num_trainable, ',')}")
+
     return nnet, device
 
 
@@ -174,40 +179,55 @@ def test_heur_nnet_par(heur_nnet_par: HeurNNetPar, states: List[State], goals: L
     print("Computed heuristic for %i states in %s seconds (%.2f/second)" % (len(states), nnet_time, states_per_sec))
 
 
-def test_policy_nnet_par(domain: Domain, policy_nnet_par: PolicyNNetPar, states: List[State], goals: List[Goal], actions: List[Action]) -> None:
+def test_policy_nnet_par(policy_nnet_par: PolicyNNetPar, states: List[State], goals: List[Goal], actions: List[Action]) -> None:
     # nnet format
     start_time = time.time()
-    policy_nnet_par.to_np_train(states, goals, actions)
+    train_data_np: List[NDArray] = policy_nnet_par.to_np_train(states, goals, actions)
     elapsed_time = time.time() - start_time
     states_per_sec = len(states) / elapsed_time
     print("Converted %i states, goals, actions for training to nnet format in "
           "%s seconds (%.2f/second)" % (len(states), elapsed_time, states_per_sec))
 
+    # initialize nnet
+    nnet_ret, device = init_nnet(policy_nnet_par)
+    nnet: PolicyNNet = cast(PolicyNNet, nnet_ret)
+    print("")
+
+    # train fprop
+    train_data: List[Tensor] = nnet_utils.to_pytorch_input(train_data_np, device)
+    nnet.train()
+    nnet(train_data)
+
     start_time = time.time()
+    nnet(train_data)
+    nnet_train_out_time = time.time() - start_time
+    states_per_sec = len(states) / nnet_train_out_time
+    print("Computed policy output for training for %i states in %s seconds (%.2f/second)" % (len(states), nnet_train_out_time, states_per_sec))
+
+    start_time = time.time()
+    nnet.eval()
     policy_nnet_par.to_np_fn(states, goals)
     elapsed_time = time.time() - start_time
     states_per_sec = len(states) / elapsed_time
     print("Converted %i states, goals for sampling to nnet format in "
           "%s seconds (%.2f/second)" % (len(states), elapsed_time, states_per_sec))
 
-    # initialize nnet
-    nnet, device = init_nnet(policy_nnet_par)
-    print("")
     policy_fn: PolicyFn = policy_nnet_par.get_nnet_fn(nnet, None, device, None)
 
-    policy_fn(domain, states, goals)
+    policy_fn(states, goals)
 
     # nnet heuristic
     start_time = time.time()
-    policy_fn(domain, states, goals)
+    policy_fn(states, goals)
 
     nnet_time = time.time() - start_time
     states_per_sec = len(states) / nnet_time
     print("Computed policy for %i states in %s seconds (%.2f/second)" % (len(states), nnet_time, states_per_sec))
 
 
-def time_test(domain: Domain, heur_nnet_par: Optional[HeurNNetPar], policy_nnet_par: Optional[PolicyNNetPar], num_states: int, step_max: int) -> None:
-    states, goals, actions = test_env(domain, num_states, step_max)
+def time_test(domain: Domain, heur_nnet_par: Optional[HeurNNetPar], policy_nnet_par: Optional[PolicyNNetPar], num_states: int, step_min: int,
+              step_max: int) -> None:
+    states, goals, actions = test_env(domain, num_states, step_min, step_max)
     if isinstance(domain, StartGoalWalkable):
         test_envstartgoalrw(domain, num_states)
     if isinstance(domain, ActsEnum):
@@ -217,4 +237,4 @@ def time_test(domain: Domain, heur_nnet_par: Optional[HeurNNetPar], policy_nnet_
         test_heur_nnet_par(heur_nnet_par, states, goals, actions)
 
     if policy_nnet_par is not None:
-        test_policy_nnet_par(domain, policy_nnet_par, states, goals, actions)
+        test_policy_nnet_par(policy_nnet_par, states, goals, actions)

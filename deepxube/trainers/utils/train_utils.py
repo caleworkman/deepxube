@@ -37,9 +37,6 @@ def train_heur_nnet_step(nnet: nn.Module, inputs_np: List[NDArray], ctgs_np: NDA
 
     # zero the parameter gradients
     optimizer.zero_grad()
-    lr_itr: float = train_args.lr * (train_args.lr_d ** train_itr)
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr_itr
 
     # send data to device
     inputs_batch: List[Tensor] = nnet_utils.to_pytorch_input(inputs_np, device)
@@ -60,30 +57,26 @@ def train_heur_nnet_step(nnet: nn.Module, inputs_np: List[NDArray], ctgs_np: NDA
 
     # display progress
     if (train_args.display > 0) and (train_itr % train_args.display == 0):
-        print("Itr: %i, lr: %.2E, loss: %.2E, targ_ctg: %.2f, "
-              f"nnet_ctg: %.2f, time: {time.time() - start_time:.2f}" % (train_itr, lr_itr, loss.item(), ctgs_batch.mean().item(), ctgs_nnet.mean().item()))
+        print("Itr: %i, loss: %.2E, targ_ctg: %.2f, nnet_ctg: %.2f, "
+              f"Time: {time.time() - start_time:.2f}" % (train_itr, loss.item(), ctgs_batch.mean().item(), ctgs_nnet.mean().item()))
 
     return ctgs_nnet.cpu().data.numpy(), float(loss.item())
 
 
-def train_policy_nnet_step(policy: PolicyNNet, states_goals_np: List[NDArray], actions_np: NDArray, optimizer: Optimizer, device: torch.device,
+def train_policy_nnet_step(policy: PolicyNNet, states_goals_actions_np: List[NDArray], optimizer: Optimizer, device: torch.device,
                            train_itr: int, train_args: TrainArgs, start_time: float) -> float:
     # train network
     policy.train()
 
     # zero the parameter gradients
     optimizer.zero_grad()
-    lr_itr: float = train_args.lr * (train_args.lr_d ** train_itr)
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr_itr
 
     # send data to device
-    states_goals: List[Tensor] = nnet_utils.to_pytorch_input(states_goals_np, device)
-    actions: Tensor = torch.tensor(actions_np, device=device)
+    states_goals_actions: List[Tensor] = nnet_utils.to_pytorch_input(states_goals_actions_np, device)
 
     # forward
-    loss_recon, loss_kl, _ = policy.autoencode(states_goals, actions)
-    loss = loss_recon + (train_args.policy_kl * loss_kl)
+    loss_arr: Tensor = policy(states_goals_actions)[0]
+    loss: Tensor = loss_arr.mean()
 
     # backwards
     loss.backward()
@@ -93,7 +86,6 @@ def train_policy_nnet_step(policy: PolicyNNet, states_goals_np: List[NDArray], a
 
     # display progress
     if (train_args.display > 0) and (train_itr % train_args.display == 0):
-        print(f"Itr: %i, lr: %.2E, loss: %.2E, loss_recon: {loss_recon.item():.2E}, loss_kl: {loss_kl.item():.2E}, "
-              f"Time: {time.time() - start_time:.2f}" % (train_itr, lr_itr, loss.item()))
+        print(f"Itr: %i, loss: %.2E, Time: {time.time() - start_time:.2f}" % (train_itr, loss.item()))
 
     return float(loss.item())

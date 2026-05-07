@@ -2,7 +2,7 @@ from typing import List, Tuple
 
 from deepxube.base.heuristic import PolicyNNet
 from deepxube.base.updater import UpdatePolicy
-from deepxube.base.trainer import Train
+from deepxube.base.trainer import Train, update_optimizer
 from deepxube.trainers.utils.train_utils import train_policy_nnet_step
 from deepxube.utils.timing_utils import Times
 
@@ -14,16 +14,14 @@ import time
 class TrainPolicy(Train[PolicyNNet, UpdatePolicy]):
     @staticmethod
     def data_parallel() -> bool:
-        return False
+        return True
 
     def _train_itr(self, batch: List[NDArray], first_itr_in_update: bool, times: Times) -> float:
         start_time = time.time()
-        states_goals_np: List[NDArray] = batch[:-1]
-        actions_np: NDArray = batch[-1]
 
         self.nnet.train()
-        loss = train_policy_nnet_step(self.nnet, states_goals_np, actions_np, self.optimizer, self.device, self.status.itr, self.train_args,
-                                      self.train_start_time)
+        update_optimizer(self.optimizer, self.nnet, self.status.itr)
+        loss = train_policy_nnet_step(self.nnet, batch, self.optimizer, self.device, self.status.itr, self.train_args, self.train_start_time)
         self.writer.add_scalar("train/loss", loss, self.status.itr)
 
         times.record_time("train", time.time() - start_time)

@@ -92,7 +92,7 @@ class Node:
         return descendants
 
 
-def get_path(node: Node) -> Tuple[List[State], List[Action], float]:
+def get_path(node: Node) -> Tuple[List[State], List[Action], List[float], float]:
     """ Gets path from the start state to the goal state associated with the input node
 
     :param node: goal node
@@ -100,21 +100,26 @@ def get_path(node: Node) -> Tuple[List[State], List[Action], float]:
     """
     path: List[State] = []
     actions: List[Action] = []
+    tcs: List[float] = []
 
     parent_node: Node = node
     while parent_node.parent is not None:
         path.append(parent_node.state)
 
         assert parent_node.parent_action is not None, "parent_action should not be None"
+        assert parent_node.parent_t_cost is not None, "parent_t_cost should not be None"
         actions.append(parent_node.parent_action)
+        tcs.append(parent_node.parent_t_cost)
         parent_node = parent_node.parent
 
     path.append(parent_node.state)
 
     path = path[::-1]
     actions = actions[::-1]
+    tcs = tcs[::-1]
 
-    return path, actions, node.path_cost
+    assert sum(tcs) == node.path_cost, "sum of transition costs should equal path cost"
+    return path, actions, tcs, node.path_cost
 
 
 class EdgeQ:
@@ -384,6 +389,8 @@ class PathFindNode(PathFind[D, FNs, INode]):
 
         # is solved
         self.set_is_solved(nodes_popped_flat)
+        # for node in nodes_popped_flat:
+        #    print(node.state, node.is_solved)
 
         # record goal
         start_time = time.time()
@@ -653,7 +660,7 @@ class PathFindSetPolicy(PathFind[D, FNsP, I], ABC):
         start_time = time.time()
         states: List[State] = [node.state for node in nodes]
         goals: List[Goal] = [node.goal for node in nodes]
-        actions_l, probs_l = self.functions.policy_fn(self.domain, states, goals)
+        actions_l, probs_l = self.functions.policy_fn(states, goals)
 
         assert len(actions_l) == len(probs_l) == len(states) == len(goals), \
             f"{len(actions_l)}, {len(probs_l)}, {len(states)}, {len(goals)}"
@@ -720,7 +727,7 @@ class PathFindActsEnum(PathFind[DActsEnum, FNs, I], ABC):
 
 class PathFindActsPolicy(PathFind[D, FNsP, I], ABC):
     def expand_states(self, states: List[State], goals: List[Goal]) -> Tuple[List[List[State]], List[List[Action]], List[List[float]]]:
-        actions_l: List[List[Action]] = self.functions.policy_fn(self.domain, states, goals)[0]
+        actions_l: List[List[Action]] = self.functions.policy_fn(states, goals)[0]
 
         # repeat states according to actions
         actions_flat, split_idxs = misc_utils.flatten(actions_l)
@@ -741,7 +748,7 @@ class PathFindActsPolicy(PathFind[D, FNsP, I], ABC):
         return states_exp, actions_l, tcs_l
 
     def get_state_actions(self, states: List[State], goals: List[Goal]) -> List[List[Action]]:
-        return self.functions.policy_fn(self.domain, states, goals)[0]
+        return self.functions.policy_fn(states, goals)[0]
 
 
 # pathfinding supervised (for training)
@@ -765,11 +772,14 @@ class PathFindSup(PathFind[D, Any, I]):
         raise NotImplementedError
 
     @abstractmethod
-    def make_instances_rw(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[I]:
-        """ Make instances from a random walk
+    def make_instances_sup(self, steps_gen: List[int], inst_infos: Optional[List[Any]]) -> List[I]:
+        """ Make nodes/edges with labels
 
         """
         pass
 
     def _set_node_vals(self, nodes: List[Node]) -> None:
         raise NotImplementedError
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"

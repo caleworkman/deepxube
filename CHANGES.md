@@ -1,5 +1,27 @@
 # Changes
 
+## 0.2.2
+* Optimizer creation and update during training now part of DeepXubeNNet class. Methods can be overridden for different behavior.
+* step_min argument added to deepxube time
+* Added ReLU2 activation function
+* Fix start_idx usage in solve
+* sample_next_state returns action taken
+* Return actions taken for random_walk
+* ActsRev implements method to sample reverse states, actions that return from reverse states, and transition costs along edges from resulting reverse states
+* Make generating supervised labels for nodes/edges a Domain mixin
+* Consolidate supervised pathfinding classes into one file.
+* Sample from data buffer without replacement until all states seen
+* Fix up_gen_itrs being set to 100. Now defaults to up_itrs unless specifically set to a given value.
+* Separate Domain mixins/pathfinding algs for supervised node, edges, and sampling edges (for policy)
+* Remove policy_rand argument
+* Policy sampling method defined in PolicyNNet
+* Add max_itrs arg to solve
+* get_path returns list of transition costs
+* Added rollout pathfinding alg, special case of beam search that does not check is_solved when searching
+* PolicyNNet has _forward_train and _forward_eval abstract methods to unify forward method
+* Add checkpointing during training
+* Add more functionality to add neural network functions to domain and use in parallel
+
 ## 0.2.1
 * Consolidate search: Beam search -> special cases: greedy_policy, graph search -> special cases: batch weighted A* search, batch weighted Q* search 
 * Replay buffer added

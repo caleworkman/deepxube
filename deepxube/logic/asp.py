@@ -80,6 +80,15 @@ class Spec:
                     models_banned=self.models_banned + spec_add.models_banned)
 
 
+def ctl_add_check(ctl: Control, block: str, add_line: str) -> None:
+    try:
+        ctl.add(block, [], f"{add_line}\n")
+    except RuntimeError as err:
+        print(f"Failed to put line {add_line} in block {block}")
+        print(err)
+        raise
+
+
 class Solver:
     def __init__(self, ground_atoms: List[Atom], bk: List[str]):
         self.bk: List[str] = bk
@@ -117,11 +126,12 @@ class Solver:
             add_line = parse_clingo_line(add_line)
             if len(add_line) == 0:
                 continue
-            self.ctl_rand.add('base', [], f"{add_line}\n")
-            self.ctl_min.add('base', [], f"{add_line}\n")
+            ctl_add_check(self.ctl_rand, 'base', f"{add_line}\n")
+            ctl_add_check(self.ctl_min, 'base', f"{add_line}\n")
+
         add_line = parse_clingo_line(minimize_grnd_atoms_str)
         if len(add_line) > 0:
-            self.ctl_min.add('base', [], f"{add_line}\n")
+            ctl_add_check(self.ctl_min, 'base', f"{add_line}\n")
 
         self.ctl_rand.ground([("base", [])])
         self.ctl_min.ground([("base", [])])
@@ -227,8 +237,8 @@ class Solver:
             prg_blk: str = goal_new_head_pred
             for goal_clause in goal:
                 goal_clause_new_head: Clause = copy_clause_with_new_head(goal_clause, goal_new_head_pred)
-                self.ctl_rand.add(prg_blk, [], f"{goal_clause_new_head.to_code()}.\n")
-                self.ctl_min.add(prg_blk, [], f"{goal_clause_new_head.to_code()}.\n")
+                ctl_add_check(self.ctl_rand, prg_blk, f"{goal_clause_new_head.to_code()}.\n")
+                ctl_add_check(self.ctl_min, prg_blk, f"{goal_clause_new_head.to_code()}.\n")
             self.ctl_rand.ground([(prg_blk, [])])
             self.ctl_min.ground([(prg_blk, [])])
 

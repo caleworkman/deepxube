@@ -138,13 +138,13 @@ def viz(args: argparse.Namespace) -> None:
 
     if args.soln:
         solved: bool = data['solved'][args.idx]
-        if solved:
-            states_on_path: List[State] = data['states_on_path'][args.idx]
+        states_on_path: Optional[List[State]] = data['states_on_path'][args.idx]
+        if states_on_path is not None:
             state_idx: int = 0
             state_idx_max: int = len(states_on_path) - 1
             plt.show(block=False)
             while True:
-                act_str = input(f"State idx {state_idx} of {state_idx_max} on solution path. Next state (n), Previous state (p), or state idx: ")
+                act_str = input(f"State idx {state_idx} of {state_idx_max} on path. Next state (n), Previous state (p), or state idx: ")
                 if len(act_str) == 0:
                     break
                 if act_str.upper() == "N":
@@ -161,7 +161,7 @@ def viz(args: argparse.Namespace) -> None:
                         _viz_state_goal_update(domain, state, goal, fig)
 
                         print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
-                        if state_idx == state_idx_max:
+                        if (state_idx == state_idx_max) and solved:
                             assert domain.is_solved([state], [goal])[0]
                 elif act_str.upper() == "P":
                     if state_idx > 0:
@@ -177,7 +177,7 @@ def viz(args: argparse.Namespace) -> None:
                     _viz_state_goal_update(domain, state, goal, fig)
                     print(f"Goal Reached: {domain.is_solved([state], [goal])[0]}")
         else:
-            input("Not solved (press enter to quit): ")
+            input("No path (press enter to quit): ")
     else:
         if isinstance(domain, StringToAct):
             print(domain.string_to_action_help())
@@ -212,8 +212,8 @@ def time_test_args(args: argparse.Namespace) -> None:
     if args.heur is not None:
         heur_nnet_par = get_heur_nnet_par_from_arg(domain, domain_name, args.heur, args.heur_type)[0]
     if args.policy is not None:
-        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp, args.policy_rand)[0]
-    time_test(domain, heur_nnet_par, policy_nnet_par, args.num_insts, args.step_max)
+        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp)[0]
+    time_test(domain, heur_nnet_par, policy_nnet_par, args.num_insts, args.step_min, args.step_max)
 
 
 def plot_itr_data(axs: List[Axes], step_slider: Slider, itr: int, itr_to_in_out: Dict[int, Tuple[NDArray, NDArray]],
@@ -381,9 +381,9 @@ def _parse_time(parser: ArgumentParser) -> None:
     parser.add_argument('--heur_type', type=str, default="V", help="V, QFix, QIn.")
     parser.add_argument('--policy', type=str, default=None, help="Policy name and arguments.")
     parser.add_argument('--policy_samp', type=int, default=10, help="")
-    parser.add_argument('--policy_rand', type=int, default=5, help="")
     parser.add_argument('--num_insts', type=int, default=10, help="Number of problem instances to generate.")
-    parser.add_argument('--step_max', type=int, default=10, help="Randomly generates problem instances with between 0 and step_max steps.")
+    parser.add_argument('--step_min', type=int, default=0, help="Min number of steps for problem instance generation.")
+    parser.add_argument('--step_max', type=int, default=10, help="Max number of steps for problem instance generation.")
     parser.set_defaults(func=time_test_args)
 
 

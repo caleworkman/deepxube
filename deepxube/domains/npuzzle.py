@@ -148,7 +148,10 @@ class NPuzzle(ActsEnumFixed[NPState, NPAction, NPGoal], GoalStartRevWalkableActs
     def get_actions_fixed(self) -> List[NPAction]:
         return self.actions.copy()
 
-    def rev_action(self, states: List[NPState], actions: List[NPAction]) -> List[NPAction]:
+    def sample_rev_state(self, states: List[NPState]) -> Tuple[List[NPState], List[NPAction], List[float]]:
+        actions: List[NPAction] = self.sample_state_action(states)
+        states_rev: List[NPState] = self.next_state(states, actions)[0]
+
         actions_rev: List[NPAction] = []
         for action in actions:
             action_val: int = action.action
@@ -159,7 +162,7 @@ class NPuzzle(ActsEnumFixed[NPState, NPAction, NPGoal], GoalStartRevWalkableActs
                 action_val_rev = action_val - 1
             actions_rev.append(NPAction(action_val_rev))
 
-        return actions_rev
+        return states_rev, actions_rev, [1.0] * len(states)
 
     def is_solved(self, states: List[NPState], goals: List[NPGoal]) -> List[bool]:
         states_np = np.stack([x.tiles for x in states], axis=0)
@@ -240,8 +243,9 @@ class NPuzzle(ActsEnumFixed[NPState, NPAction, NPGoal], GoalStartRevWalkableActs
 
         return num_inversions
 
-    def random_walk(self, states: List[NPState], num_steps_l: List[int]) -> Tuple[List[NPState], List[float]]:
+    def random_walk(self, states: List[NPState], num_steps_l: List[int]) -> Tuple[List[NPState], List[List[NPAction]], List[float]]:
         states_np = np.stack([x.tiles for x in states], axis=0)
+        actions_l: List[List[NPAction]] = [[] for _ in states]
         path_costs: List[float] = [0.0 for _ in states]
 
         # Get z_idxs
@@ -263,11 +267,12 @@ class NPuzzle(ActsEnumFixed[NPState, NPAction, NPGoal], GoalStartRevWalkableActs
 
             idx: int
             for move_idx, idx in enumerate(idxs):
+                actions_l[idx].append(NPAction(move))
                 path_costs[idx] += tcs[move_idx]
 
             num_actions[idxs] = num_actions[idxs] + 1
 
-        return [NPState(x) for x in states_np], path_costs
+        return [NPState(x) for x in states_np], actions_l, path_costs
 
     def _get_swap_zero_idxs(self, n: int) -> NDArray[int_t]:
         swap_zero_idxs: NDArray[int_t] = np.zeros((n ** 2, len(self.moves)), dtype=self.dtype)

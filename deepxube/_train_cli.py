@@ -23,9 +23,7 @@ def parser_train(parser: ArgumentParser) -> None:
                                                                     "QIn maps state/goal/action tuples to q_value (can be used in arbitrary action spaces).")
 
     parser.add_argument('--policy', type=str, default=None, help="Policy neural network and arguments.")
-    parser.add_argument('--policy_samp', type=int, default=10, help="")
-    parser.add_argument('--policy_rand', type=int, default=5, help="")
-    parser.add_argument('--policy_kl', type=float, default=0.1, help="")
+    parser.add_argument('--policy_samp', type=int, default=10, help="Number to actions to sample from policy")
 
     parser.add_argument('--pathfind', type=str, required=True, help="Pathfinding algorithm and arguments. Batch size of any pathfinding algorithm should be 1 "
                                                                     "since updater assumes 1 instance is generated per iteration.")
@@ -37,9 +35,10 @@ def parser_train(parser: ArgumentParser) -> None:
     # train args
     train_group = parser.add_argument_group('train')
     train_group.add_argument('--batch_size', type=int, default=1000, help="Batch size.")
-    train_group.add_argument('--lr', type=float, default=0.001, help=" Learning rate.")
-    train_group.add_argument('--lr_d', type=float, default=0.9999993, help="Learning rate decay.")
     train_group.add_argument('--max_itrs', type=int, default=100000, help="Maximum training iterations.")
+    train_group.add_argument('--chkpt', type=int, default=0, help="Save checkpoint file of network being trained at initialization and at every given "
+                                                                  "number of update checks. Checkpoint number given is training iteration, not update number."
+                                                                  "If 0 then checkpointing is not done.")
     train_group.add_argument('--display', type=int, default=0, help="Display frequency for nnet training.")
     train_group.add_argument('--bal', action='store_true', default=False, help="Set to balance of number of steps to take to generate problem instances based "
                                                                                "on percentage of states solved.")
@@ -55,8 +54,9 @@ def parser_train(parser: ArgumentParser) -> None:
     update_group.add_argument('--procs', type=int, default=1, help="Number of processes to generate update data.")
     update_group.add_argument('--step_max', type=int, required=True, help="Maximum number of steps to take when generating problem instnaces.")
     update_group.add_argument('--up_itrs', type=int, default=100, help="Number of iterations to check for update.")
-    update_group.add_argument('--up_gen_itrs', type=int, default=100, help="Number of iterations for which to generate training data per update check.")
-    update_group.add_argument('--search_itrs', type=int, default=1000, help="Number of search iterations to take when generating data.")
+    update_group.add_argument('--up_gen_itrs', type=int, default=None, help="Number of iterations for which to generate training data per update check. "
+                                                                            "If None then defaults to up_itrs.")
+    update_group.add_argument('--search_itrs', type=int, default=1, help="Number of search iterations to take when generating data.")
     update_group.add_argument('--up_batch_size', type=int, default=100, help="Maximum number of problem instances to generate at a time. Lower if running out "
                                                                              "of memory.")
     update_group.add_argument('--up_nnet_batch_size', type=int, default=20000, help="Maximum number of inputs to give to any nnet at a time during update. "
@@ -107,14 +107,14 @@ def train_cli(args: argparse.Namespace) -> None:
         assert isinstance(update_ret, UpdateHeur)
         update_heur = update_ret
     if args.policy is not None:
-        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp, args.policy_rand)[0]
+        policy_nnet_par = get_policy_nnet_par_from_arg(domain, domain_name, args.policy, args.policy_samp)[0]
         update_ret = get_updater(domain, args.pathfind, up_args, args.her, "policy")
         assert isinstance(update_ret, UpdatePolicy)
         update_policy = update_ret
 
     # train args
-    train_args: TrainArgs = TrainArgs(args.batch_size, args.lr, args.lr_d, args.max_itrs, args.bal, rb=args.rb, loss_thresh=args.up_lt,
-                                      policy_kl=args.policy_kl, skip_heur=args.skip_heur, skip_policy=args.skip_policy, display=args.display)
+    train_args: TrainArgs = TrainArgs(args.batch_size, args.max_itrs, args.bal, rb=args.rb, loss_thresh=args.up_lt, skip_heur=args.skip_heur,
+                                      skip_policy=args.skip_policy, checkpoint=args.chkpt, display=args.display)
 
     # test args
     test_args: Optional[TestArgs] = None

@@ -557,7 +557,10 @@ class Cube3(NextStateNPActsEnumFixed[Cube3State, Cube3Action, Cube3Goal],
     def get_actions_fixed(self) -> List[Cube3Action]:
         return self.actions.copy()
 
-    def rev_action(self, states: List[Cube3State], actions: List[Cube3Action]) -> List[Cube3Action]:
+    def sample_rev_state(self, states: List[Cube3State]) -> Tuple[List[Cube3State], List[Cube3Action], List[float]]:
+        actions: List[Cube3Action] = self.sample_state_action(states)
+        states_rev: List[Cube3State] = self.next_state(states, actions)[0]
+
         actions_rev: List[Cube3Action] = []
         for action in actions:
             action_val: int = action.action
@@ -568,7 +571,7 @@ class Cube3(NextStateNPActsEnumFixed[Cube3State, Cube3Action, Cube3Goal],
                 action_val_rev = action_val - 1
             actions_rev.append(Cube3Action(action_val_rev))
 
-        return actions_rev
+        return states_rev, actions_rev, [1.0] * len(states)
 
     def _states_to_np(self, states: List[Cube3State]) -> List[NDArray[np.uint8]]:
         return [np.stack([x.colors for x in states], axis=0)]
