@@ -34,12 +34,8 @@ class SymbolicRegressionNet(HeurNNet[SymbolicRegressionNNetInput]):
         )
 
     def _forward(self, inputs: List[Tensor]) -> Tensor:
-        pass
+        return self.heur(inputs[0])     # GridNet does this inputs[0] indexing, why?
 
 
 # no arguments, means no need for parser class
 # the parser just modifies hyperparameters, explore this later
-
-# transformer to tokenize the expression
-# implement to_np functions
-# papers on chemical reactions

@@ -1,10 +1,10 @@
 from typing import List, Optional, Any
-
+import re
 from numpy._typing import NDArray
 
 from deepxube.base.factory import Parser
 from deepxube.base.domain import State, Action, Goal, ActsEnum, StartGoalWalkable, StringToAct, StateGoalVizable, A
-from deepxube.base.nnet_input import StateGoalIn, G
+from deepxube.base.nnet_input import StateGoalIn
 
 from deepxube.factories.domain_factory import domain_factory
 from deepxube.factories.nnet_input_factory import register_nnet_input
@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from enum import IntEnum, auto
+
+from transformers import BertTokenizer, BertTokenizerFast
 
 
 class SymbolicState(State):
@@ -234,21 +236,33 @@ class SymbolicParser(Parser):
 @register_nnet_input("symbolic_regression", "symbolic_regression_nnet_input")
 class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState, SymbolicGoal]):
 
-    # How should this get the Tokenizer?
     def get_input_info(self) -> Any:
+        # Where does "domain" come from in Grid? i.e. self.domain.dim
         pass
 
-    def to_np(self, states: List[SymbolicState], goals: List[SymbolicGoal]) -> List[NDArray]:
+    def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[list[NDArray]]:
+        tokenizer = BertTokenizer.from_pretrained(
+            '../../notebooks/vocab.txt',
+            lowercase=True
+        )
 
-        # there are multiple token's, y's, and g's because it expects examples which it can distribute across GPUs, etc
+        # Each row should be a problem instance
+        # should each row (i.e. the token array) be padded to the same length?
         tokens = [tokenizer.tokenize(str(s.expr)) for s in states]
-        encoded_tokens = [tokenizer.encode(t) for t in tokens]
+        encoded_tokens = [np.array(tokenizer.encode(t)) for t in tokens]
 
-        return [
-            encoded_tokens,
-            goals[0].xs,
-            [g.ys for g in goals]
-        ]
+        # Output is shaped like, where each array is a NumPy Array; Should they be combined into one array per row?
+        # [
+        #   [token_array1, goal_x_array1, goal_y_array],
+        #   [token_array2, goal_x_array2, goal_y_array2],
+        #   etc
+        # ]
+        return [[ts, g.xs, g.ys] for ts, g in zip(encoded_tokens, goals)]
+
+    @staticmethod
+    def normalize(expr):
+        """Adds spaces between tokens in an expression. Needed before using BertTokenizer."""
+        return " ".join(re.findall(r'\d+|[a-zA-Z]+|[\+\-\*/\^\=\(\)]', expr))
 
 
 # For NN, may need to implement a different structure than Grid/Cube
