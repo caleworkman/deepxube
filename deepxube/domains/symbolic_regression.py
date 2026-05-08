@@ -238,18 +238,24 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
 
     def get_input_info(self) -> Any:
         # Where does "domain" come from in Grid? i.e. self.domain.dim
+        # Maybe this should return the token array size, if it requires padding?
         pass
 
-    def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[list[NDArray]]:
-        tokenizer = BertTokenizer.from_pretrained(
-            '../../notebooks/vocab.txt',
-            lowercase=True
+    @staticmethod
+    def _state_to_np(state: SymbolicState, tokenizer: BertTokenizer) -> np.ndarray:
+        encoding = tokenizer(
+            str(state.expr),
+            padding='max_length',
+            return_tensors='np',
+            max_length=128
         )
+        return np.concatenate((encoding['input_ids'], encoding['attention_mask']), axis=None)
 
+    def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[list[NDArray]]:
         # Each row should be a problem instance
         # should each row (i.e. the token array) be padded to the same length?
-        tokens = [tokenizer.tokenize(str(s.expr)) for s in states]
-        encoded_tokens = [np.array(tokenizer.encode(t)) for t in tokens]
+        tokenizer = BertTokenizer.from_pretrained('../../notebooks/vocab.txt', lowercase=True)
+        tokens = [self._state_to_np(state, tokenizer) for state in states]
 
         # Output is shaped like, where each array is a NumPy Array; Should they be combined into one array per row?
         # [
@@ -257,12 +263,8 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
         #   [token_array2, goal_x_array2, goal_y_array2],
         #   etc
         # ]
-        return [[ts, g.xs, g.ys] for ts, g in zip(encoded_tokens, goals)]
+        return [[ts, g.xs, g.ys] for ts, g in zip(tokens, goals)]
 
-    @staticmethod
-    def normalize(expr):
-        """Adds spaces between tokens in an expression. Needed before using BertTokenizer."""
-        return " ".join(re.findall(r'\d+|[a-zA-Z]+|[\+\-\*/\^\=\(\)]', expr))
 
 
 # For NN, may need to implement a different structure than Grid/Cube
