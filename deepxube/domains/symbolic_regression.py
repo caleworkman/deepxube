@@ -18,7 +18,7 @@ from matplotlib.figure import Figure
 
 from enum import IntEnum, auto
 
-from transformers import BertTokenizer, BertTokenizerFast
+from transformers import BertTokenizer
 
 
 class SymbolicState(State):
@@ -236,6 +236,8 @@ class SymbolicParser(Parser):
 @register_nnet_input("symbolic_regression", "symbolic_regression_nnet_input")
 class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState, SymbolicGoal]):
 
+    # python -m deepxube train --domain symbolic_regression.5 --heur resnet_fc.100H_2B_bn --heur_type V --pathfind graph_v --step_max 10 --up_itrs 10 --search_itrs 10 --backup -1 --procs 1 --batch_size 3 --max_itrs 10 --dir dummy/
+
     def get_input_info(self) -> Any:
         # Where does "domain" come from in Grid? i.e. self.domain.dim
         # Maybe this should return the token array size, if it requires padding?
@@ -253,16 +255,8 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
 
     def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[NDArray]:
         # Each row should be a problem instance
-        # should each row (i.e. the token array) be padded to the same length?
         tokenizer = BertTokenizer.from_pretrained('../../notebooks/vocab.txt', lowercase=True)
         tokens = [self._state_to_np(state, tokenizer) for state in states]
-
-        # Output is shaped like, where each array is a NumPy Array; Should they be combined into one array per row?
-        # [
-        #   [token_array1, goal_x_array1, goal_y_array1],
-        #   [token_array2, goal_x_array2, goal_y_array2],
-        #   etc
-        # ]
         return [np.concat([ts, g.xs, g.ys]) for ts, g in zip(tokens, goals)]
 
 
