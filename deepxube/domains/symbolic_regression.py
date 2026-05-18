@@ -247,7 +247,7 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
             str(state.expr),
             padding='max_length',
             return_tensors='np',
-            max_length=128
+            max_length=64
         )
         return np.concatenate((encoding['input_ids'], encoding['attention_mask']), axis=None)
 
@@ -259,7 +259,7 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
 
         # Output is shaped like, where each array is a NumPy Array; Should they be combined into one array per row?
         # [
-        #   [token_array1, goal_x_array1, goal_y_array],
+        #   [token_array1, goal_x_array1, goal_y_array1],
         #   [token_array2, goal_x_array2, goal_y_array2],
         #   etc
         # ]
