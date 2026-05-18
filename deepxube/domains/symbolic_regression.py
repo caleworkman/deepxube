@@ -251,7 +251,7 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
         )
         return np.concatenate((encoding['input_ids'], encoding['attention_mask']), axis=None)
 
-    def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[list[NDArray]]:
+    def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[NDArray]:
         # Each row should be a problem instance
         # should each row (i.e. the token array) be padded to the same length?
         tokenizer = BertTokenizer.from_pretrained('../../notebooks/vocab.txt', lowercase=True)
@@ -263,7 +263,7 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
         #   [token_array2, goal_x_array2, goal_y_array2],
         #   etc
         # ]
-        return [[ts, g.xs, g.ys] for ts, g in zip(tokens, goals)]
+        return [np.concat([ts, g.xs, g.ys]) for ts, g in zip(tokens, goals)]
 
 
 
