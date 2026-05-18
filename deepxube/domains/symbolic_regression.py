@@ -1,6 +1,12 @@
-from typing import List, Optional, Any
-import re
+from pathlib import Path
+from typing import List, Optional, Any, Type
 from numpy._typing import NDArray
+
+from torch import nn, Tensor
+
+from deepxube.base.heuristic import HeurNNet
+from deepxube.nnet.pytorch_models import FullyConnectedModel
+from deepxube.factories.heuristic_factory import heuristic_factory
 
 from deepxube.base.factory import Parser
 from deepxube.base.domain import State, Action, Goal, ActsEnum, StartGoalWalkable, StringToAct, StateGoalVizable, A
@@ -236,7 +242,12 @@ class SymbolicParser(Parser):
 @register_nnet_input("symbolic_regression", "symbolic_regression_nnet_input")
 class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState, SymbolicGoal]):
 
-    # python -m deepxube train --domain symbolic_regression.5 --heur resnet_fc.100H_2B_bn --heur_type V --pathfind graph_v --step_max 10 --up_itrs 10 --search_itrs 10 --backup -1 --procs 1 --batch_size 3 --max_itrs 10 --dir dummy/
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        vocab_dir = Path(__file__).parent / "../../notebooks"
+        self.tokenizer = BertTokenizer.from_pretrained(
+            str(vocab_dir.resolve()), lowercase=True
+        )
 
     def get_input_info(self) -> Any:
         # Where does "domain" come from in Grid? i.e. self.domain.dim
@@ -255,10 +266,39 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
 
     def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[NDArray]:
         # Each row should be a problem instance
-        tokenizer = BertTokenizer.from_pretrained('../../notebooks/vocab.txt', lowercase=True)
-        tokens = [self._state_to_np(state, tokenizer) for state in states]
-        return [np.concat([ts, g.xs, g.ys]) for ts, g in zip(tokens, goals)]
+        tokens = [self._state_to_np(state, self.tokenizer) for state in states]
+        return [np.concatenate([ts, g.xs, g.ys]) for ts, g in zip(tokens, goals)]
 
+
+@heuristic_factory.register_class("symbolic_regression_net")
+class SymbolicRegressionNet(HeurNNet[SymbolicRegressionNNetInput]):
+    # python -m deepxube train --domain symbolic_regression.5 --heur resnet_fc.100H_2B_bn --heur_type V --pathfind graph_v --step_max 10 --up_itrs 10 --search_itrs 10 --backup -1 --procs 1 --batch_size 3 --max_itrs 10 --dir dummy/
+    # python -m deepxube train --domain symbolic_regression.5 --heur symbolic_regression_net --heur_type V --pathfind graph_v --step_max 10 --up_itrs 10 --search_itrs 10 --backup -1 --procs 1 --batch_size 3 --max_itrs 10 --dir dummy/
+
+    @staticmethod
+    def nnet_input_type() -> Type[SymbolicRegressionNNetInput]:
+        return SymbolicRegressionNNetInput
+
+    def __init__(self, nnet_input: SymbolicRegressionNNetInput, out_dim: int, q_fix: bool, fc_size=256):
+        super().__init__(nnet_input, out_dim, q_fix)
+        input_dim = 64 + 64 + 20 + 20  # = 168, padding of tokens and attention, fixed size for x and y's
+
+        self.heur = nn.Sequential(
+            FullyConnectedModel(
+                input_dim,
+                [fc_size, fc_size],
+                ["RELU", "RELU"],
+                batch_norms=[True, True]
+            ),
+            nn.Linear(fc_size, self.out_dim)
+        )
+
+    def _forward(self, inputs: List[Tensor]) -> Tensor:
+        return self.heur(inputs[0])
+
+
+# no arguments, means no need for parser class
+# the parser just modifies hyperparameters, explore this later
 
 
 # For NN, may need to implement a different structure than Grid/Cube
