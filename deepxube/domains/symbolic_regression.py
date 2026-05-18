@@ -99,13 +99,16 @@ class SymbolicRegression(
     StringToAct[SymbolicState, SymbolicAction, SymbolicGoal]
 ):
 
-    def __init__(self, random_walk_length: int):
+    def __init__(self, walk_length: int):
         # Test: python -m deepxube viz --domain symbolic_regression.1 --steps 5
         super().__init__()
-        self.random_walk_length = random_walk_length
+        self.walk_length = walk_length
 
-    def sample_start_states(self, walk_length: int) -> List[SymbolicState]:
-        states, actions, costs = self.random_walk([SymbolicState(x)], [walk_length])
+    def sample_start_states(self, num_states: int) -> list[SymbolicState]:
+        states, _, _ = self.random_walk(
+            [SymbolicState(x)] * num_states,
+            [self.walk_length] * num_states
+        )
         return states
 
     def sample_goal_from_state(self, states_start: Optional[list[SymbolicState]], states_goal: list[SymbolicState]) -> list[SymbolicGoal]:
@@ -118,6 +121,7 @@ class SymbolicRegression(
             print('Goal: ', state.expr)
             f = lambdify(x, state.expr, 'numpy')
             ys = f(xs)
+            ys = np.broadcast_to(ys, xs.shape).copy()  # handles scalar/0-d case
             goals.append(SymbolicGoal(xs=xs, ys=ys, tolerance=0))
         return goals
 
@@ -233,7 +237,7 @@ class SymbolicRegression(
 @domain_factory.register_parser("symbolic_regression")
 class SymbolicParser(Parser):
     def parse(self, args_str: str) -> dict[str, Any]:
-        return {"random_walk_length": int(args_str)}
+        return {"walk_length": int(args_str)}
 
     def help(self) -> str:
         return "An integer number of start states to generate through a random walk.'"
@@ -267,12 +271,12 @@ class SymbolicRegressionNNetInput(StateGoalIn[SymbolicRegression, SymbolicState,
     def to_np(self, states: list[SymbolicState], goals: list[SymbolicGoal]) -> list[NDArray]:
         # Each row should be a problem instance
         tokens = [self._state_to_np(state, self.tokenizer) for state in states]
-        return [np.concatenate([ts, g.xs, g.ys]) for ts, g in zip(tokens, goals)]
+        rows = [np.concatenate([ts.flatten(), g.xs.flatten(), g.ys.flatten()]) for ts, g in zip(tokens, goals)]
+        return [np.stack(rows)]  # shape: (batch_size, 168)
 
 
 @heuristic_factory.register_class("symbolic_regression_net")
 class SymbolicRegressionNet(HeurNNet[SymbolicRegressionNNetInput]):
-    # python -m deepxube train --domain symbolic_regression.5 --heur resnet_fc.100H_2B_bn --heur_type V --pathfind graph_v --step_max 10 --up_itrs 10 --search_itrs 10 --backup -1 --procs 1 --batch_size 3 --max_itrs 10 --dir dummy/
     # python -m deepxube train --domain symbolic_regression.5 --heur symbolic_regression_net --heur_type V --pathfind graph_v --step_max 10 --up_itrs 10 --search_itrs 10 --backup -1 --procs 1 --batch_size 3 --max_itrs 10 --dir dummy/
 
     @staticmethod

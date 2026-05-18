@@ -10,7 +10,7 @@ class TestSymbolicRegression(unittest.TestCase):
     # python -m unittest tests.test_symbolic_regression.TestSymbolicRegression
 
     def setUp(self):
-        self.regr = SymbolicRegression(random_walk_length=5)
+        self.regr = SymbolicRegression(walk_length=5)
 
     def test_add_one_to_x(self):
 
