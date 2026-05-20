@@ -225,7 +225,7 @@ class SymbolicRegression(
         fig.add_axes(ax)
 
         # The state
-        xs = np.linspace(0, 1, 20)  # TODO: Change these values later, maybe more points
+        xs = np.linspace(0.05, 1, 20)  # TODO: Change these values later, maybe more points
         f = lambdify(x, state.expr, 'numpy')
         ys = f(xs)
         ax.plot(xs, ys)
