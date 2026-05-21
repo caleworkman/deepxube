@@ -118,7 +118,6 @@ class SymbolicRegression(
 
         goals = []
         for state in states_goal:
-            print('Goal: ', state.expr)
             f = lambdify(x, state.expr, 'numpy')
             ys = f(xs)
             ys = np.broadcast_to(ys, xs.shape).copy()  # handles scalar/0-d case
@@ -216,9 +215,6 @@ class SymbolicRegression(
     def visualize_state_goal(self, state: SymbolicState, goal: SymbolicGoal, fig: Figure) -> None:
         # can create a figure with the data points, and the function (state) overlaid
         ax = plt.axes()
-
-        print('xs', goal.xs)
-        print('ys', goal.ys)
 
         # The goal
         ax.plot(goal.xs, goal.ys)
